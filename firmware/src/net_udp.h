@@ -9,7 +9,7 @@
 // One received UDP datagram, copied out of the Wi-Fi stack so the rx task
 // never blocks on a slow consumer. Plain-old-data: safe for FreeRTOS queues.
 struct RawPacket {
-    uint32_t rxMicros;           // micros() when the datagram was read
+    uint32_t rxMs;               // millis() when the datagram was read (wrap-safe)
     uint32_t srcIp;              // IPv4, network byte order as IPAddress uint32
     uint16_t srcPort;
     uint16_t len;                // bytes stored in data (<= UDP_MAX_PAYLOAD)

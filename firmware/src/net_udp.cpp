@@ -3,9 +3,11 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
+#include <atomic>
+
 static QueueHandle_t s_queue = nullptr;
-static volatile uint32_t s_received = 0;
-static volatile uint32_t s_droppedQueueFull = 0;
+static std::atomic<uint32_t> s_received{0};
+static std::atomic<uint32_t> s_droppedQueueFull{0};
 
 // Log who joins/leaves the AP; very useful when debugging phone connection.
 static void onWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
@@ -48,8 +50,9 @@ bool netStartAccessPoint() {
 }
 
 // Receive task: poll the socket, copy each datagram into a RawPacket and
-// push it to the queue WITHOUT blocking. If the consumer is behind, drop the
-// newest packet and count it (stale motion data is worse than missing data).
+// push it to the queue WITHOUT blocking. If the consumer is behind, evict the
+// oldest queued packet so it always drains the newest (stale motion data is
+// worse than missing data) and count the loss.
 static void udpTask(void *) {
     WiFiUDP udp;
     if (!udp.begin(UDP_PORT)) {
@@ -66,16 +69,24 @@ static void udpTask(void *) {
             vTaskDelay(pdMS_TO_TICKS(UDP_POLL_INTERVAL_MS));
             continue;
         }
-        pkt.rxMicros = micros();
+        pkt.rxMs = millis();
         pkt.srcIp = static_cast<uint32_t>(udp.remoteIP());
         pkt.srcPort = udp.remotePort();
         const int n = udp.read(pkt.data, UDP_MAX_PAYLOAD);
         pkt.len = n > 0 ? static_cast<uint16_t>(n) : 0;
         pkt.truncated = static_cast<size_t>(avail) > UDP_MAX_PAYLOAD;
-        s_received++;
+        s_received.fetch_add(1, std::memory_order_relaxed);
 
         if (xQueueSend(s_queue, &pkt, 0) != pdTRUE) {
-            s_droppedQueueFull++;
+            // Queue full: evict the oldest entry, then retry. This is the only
+            // producer, so with the consumer draining there is now room.
+            RawPacket stale;
+            if (xQueueReceive(s_queue, &stale, 0) == pdTRUE) {
+                s_droppedQueueFull.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (xQueueSend(s_queue, &pkt, 0) != pdTRUE) {
+                s_droppedQueueFull.fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
 }
@@ -90,5 +101,7 @@ QueueHandle_t netStartUdp() {
     return s_queue;
 }
 
-uint32_t netPacketsReceived() { return s_received; }
-uint32_t netPacketsDroppedQueueFull() { return s_droppedQueueFull; }
+uint32_t netPacketsReceived() { return s_received.load(std::memory_order_relaxed); }
+uint32_t netPacketsDroppedQueueFull() {
+    return s_droppedQueueFull.load(std::memory_order_relaxed);
+}

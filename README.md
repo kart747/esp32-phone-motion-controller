@@ -22,26 +22,43 @@ A Wii-Remote-style motion controller for tennis/cricket PC games.
 
 | Phase | What | State |
 |---|---|---|
-| 1 | Scaffold, `config.h`, SoftAP, raw UDP dump to serial, `phone_sim.py`, `udp_sniff.py` | Written, pushed. **Firmware not yet compiled or tested on hardware.** |
-| 2 | CSV parser, packet stats, 500 ms timeout safety | Not started |
-| 3 | Calibration + complementary filter, roll/pitch at 10 Hz | Not started |
+| 1 | Scaffold, `config.h`, SoftAP, raw UDP dump to serial, `phone_sim.py`, `udp_sniff.py` | Done; flashed and running on the ESP32. |
+| 2 | CSV parser, packet stats, 500 ms safety timeout | Implemented, unit-tested, flashed. Live stream check outstanding. |
+| 3 | Calibration + complementary filter, roll/pitch at 10 Hz | Implemented, unit-tested, flashed. Live tilt check outstanding. |
 | 4 | BLE gamepad (buttons + analog stick) and CachyOS pairing steps | Not started |
 | 5 | Swing detection, tennis classification, tuning mode, remaining tools | Not started |
 | 6 | Cricket mode, Mode button, LED states | Not started |
 | 7 | Optional ESP32 web dashboard | Not started |
 
 Work proceeds one phase at a time; each phase is tested before the next begins.
+`origin/wip/motion-lib` holds unintegrated Phase 5-6 logic (gestures, stick,
+LED) kept for later; nothing from it is wired into the firmware yet.
 
 ## Repo layout
 
 ```
 firmware/   PlatformIO project (Arduino framework, ESP32 / ESP32-S3)
   include/config.h   ALL pins, ports, timings, thresholds - no magic numbers elsewhere
-  src/               net_udp, main (more modules arrive in later phases)
+  src/               net_udp (SoftAP + UDP rx), main (tasks, serial commands)
+  lib/motion/        hardware-free logic: parser, packet stats, sample timing,
+                     calibration, gravity filter, pipeline. Tested with `pio test -e native`
+  test/              native unit tests for lib/motion
 tools/      Python 3 helpers: phone_sim.py, udp_sniff.py (+ more in Phase 5)
-docs/       testing.md (Phase 1 steps now; axes.md, wiring, pairing later)
+docs/       testing.md, axes.md
 data/       recorded swing CSVs (gitignored)
 ```
+
+## Serial commands
+
+With the monitor open, type one command per line:
+
+| Command | Effect |
+|---|---|
+| `recal` | redo still-pose calibration |
+| `raw` | toggle printing every raw UDP payload |
+| `hex` | toggle the hex view of payloads |
+| `angles` | toggle the 10 Hz roll/pitch output |
+| `stats` | print the counters now |
 
 ## Quick start (Phase 1)
 

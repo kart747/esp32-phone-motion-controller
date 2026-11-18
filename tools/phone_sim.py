@@ -8,10 +8,11 @@ Units: accel in m/s^2 (INCLUDING gravity), gyro in rad/s - same as Android's
 TYPE_ACCELEROMETER / TYPE_GYROSCOPE.
 
 Provisional axis convention (finalised in docs/axes.md in a later phase):
-phone held like a racket handle, long axis (y) pointing up at rest, so a
-still phone reads ay ~ +9.81. A forehand swing is a gyro pulse about y (+),
-a backhand is the same pulse with the opposite sign (-), with a matching
-sideways (x) acceleration burst.
+phone held FLAT, screen up, top edge pointing away from you, so a still phone
+reads az ~ +9.81 and the gravity vector is (0, 0, 1). This is the neutral pose
+the firmware calibrates to. A forehand swing is a gyro pulse about z (the
+vertical, +) with a matching sideways x acceleration burst; a backhand is the
+same pulse with the opposite sign (-).
 
 Scenarios: still | forehand | backhand | noise | sequence
 
@@ -41,7 +42,7 @@ SEQUENCE_PLAN = [("still", 2.0), ("forehand", 0.6), ("still", 1.5),
 def sample(scenario: str, t: float):
     """Return (ax, ay, az, gx, gy, gz) for `scenario` at time t (seconds
     since the scenario started)."""
-    ax, ay, az = 0.0, GRAVITY, 0.0
+    ax, ay, az = 0.0, 0.0, GRAVITY
     gx, gy, gz = GYRO_BIAS
     a_std, g_std = ACCEL_NOISE_STD, GYRO_NOISE_STD
 
@@ -49,7 +50,7 @@ def sample(scenario: str, t: float):
         sign = 1.0 if scenario == "forehand" else -1.0
         # Half-sine envelope: smooth rise and fall like a real swing.
         env = math.sin(math.pi * t / SWING_DURATION_S)
-        gy += sign * SWING_PEAK_GYRO * env
+        gz += sign * SWING_PEAK_GYRO * env
         ax += sign * SWING_PEAK_ACCEL * env
     elif scenario == "noise":
         a_std, g_std = NOISE_SCENARIO_ACCEL_STD, NOISE_SCENARIO_GYRO_STD
