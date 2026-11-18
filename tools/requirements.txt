@@ -1,0 +1,4 @@
+# Phase 1 tools (phone_sim.py, udp_sniff.py) use only the standard library.
+# Later phases add the packages below.
+pyserial>=3.5      # serial_logger.py
+matplotlib>=3.7    # plot_swings.py
