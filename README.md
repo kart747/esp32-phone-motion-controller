@@ -75,6 +75,6 @@ Buttons are not used by the firmware until later phases.
 
 ## For collaborators
 
-- Next step is **Phase 1 hardware verification**: compile, flash, run the simulator and the real phone, and record the phone app's packet format. The Phase 2 parser depends on it.
+- See [docs/next-steps.md](docs/next-steps.md) for the checklist. First task: **Phase 1 hardware verification** and capturing the phone packet format; the Phase 2 parser depends on it.
 - Keep every threshold, pin and port in `config.h`.
 - Small, focused commits; push to `main` (or a branch if you prefer).
