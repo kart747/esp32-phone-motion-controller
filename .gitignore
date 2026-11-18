@@ -1,0 +1,8 @@
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+.venv/
+# Recorded swing data is personal; keep the folder but not the contents
+data/*
+!data/.gitkeep
