@@ -110,6 +110,21 @@ constexpr float    ACCEL_TRUST_TOL_MS2  = 1.5f;  // ignore accel when | |a| - g 
 // axis). Beyond this tilt the angles are reported as unusable instead.
 constexpr float    NEAR_SINGULAR_PITCH_DEG = 75.0f;
 
+// ------------------------------------------------ Analog stick (tilt -> stick)
+// Roll/pitch are already relative to the calibrated neutral pose.
+constexpr float    STICK_DEADZONE_DEG   = 5.0f;   // tilt ignored below this
+constexpr float    STICK_FULLSCALE_DEG  = 35.0f;  // tilt for full deflection
+constexpr float    STICK_X_SIGN         = 1.0f;   // +1: tilt right -> stick right
+// HID Y grows downward. +1: nose down (tilt forward) -> stick up/forward.
+constexpr float    STICK_Y_SIGN         = 1.0f;
+
+// ----------------------------------------------------------- Gamepad (BLE HID)
+constexpr char     BLE_DEVICE_NAME[]    = "MotionCtl Pad";
+constexpr char     BLE_MANUFACTURER[]   = "DIY";
+constexpr int16_t  GAMEPAD_AXIS_MAX     = 32767;  // HID axis range is -MAX..MAX
+constexpr uint32_t GAMEPAD_REPORT_INTERVAL_MS = 20;  // at most 50 stick reports/s
+constexpr uint8_t  GAMEPAD_BUTTON_COUNT = 8;
+
 // --------------------------------------------------------------- Debug
 constexpr bool     DUMP_RAW             = false;  // print every raw payload
 constexpr bool     DUMP_HEX             = false;  // ...plus a hex view
