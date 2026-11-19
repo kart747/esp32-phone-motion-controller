@@ -1,6 +1,6 @@
-// Phases 2-3: CSV parse -> counters/watchdog -> calibration -> gravity filter
-// -> roll/pitch at 10 Hz. Gamepad output arrives in Phase 4; until then the
-// safety rule only reports the release.
+// Phases 2-4: CSV parse -> counters/watchdog -> calibration -> gravity filter
+// -> roll/pitch -> analog stick on a BLE HID gamepad. The safety rule (no
+// valid data for DATA_TIMEOUT_MS) centres the stick and releases all inputs.
 #include <Arduino.h>
 #include <IPAddress.h>
 
@@ -8,11 +8,13 @@
 #include <string.h>
 
 #include "config.h"
+#include "gamepad_ble.h"
 #include "net_udp.h"
 #include "output_gate.h"
 #include "packet_stats.h"
 #include "parser.h"
 #include "pipeline.h"
+#include "stick.h"
 
 namespace {
 
@@ -22,6 +24,8 @@ const CsvLayout kLayout = CsvLayout::fromConfig();
 PacketStats s_stats;
 OrientationPipeline s_pipeline;
 OutputGate s_gate;
+GamepadBle s_pad;
+bool s_padWasConnected = false;
 PipelineOutput s_out;
 
 std::atomic<bool> s_rawDump{DUMP_RAW};
@@ -53,14 +57,15 @@ void printStats(uint32_t nowMs) {
     else snprintf(sinceBuf, sizeof(sinceBuf), "%lu ms", static_cast<unsigned long>(since));
 
     Serial.printf("[stats] datagrams=%lu samples=%lu malformed=%lu overflow=%lu "
-                  "truncated=%lu qdrop=%lu pps=%.1f sps=%.1f since_valid=%s\n",
+                  "truncated=%lu qdrop=%lu pps=%.1f sps=%.1f since_valid=%s ble=%s\n",
                   static_cast<unsigned long>(s_stats.datagrams()),
                   static_cast<unsigned long>(s_stats.samples()),
                   static_cast<unsigned long>(s_stats.malformed()),
                   static_cast<unsigned long>(s_stats.overflow()),
                   static_cast<unsigned long>(s_stats.truncated()),
                   static_cast<unsigned long>(s_stats.queueDrops()),
-                  s_stats.packetsPerSec(), s_stats.samplesPerSec(), sinceBuf);
+                  s_stats.packetsPerSec(), s_stats.samplesPerSec(), sinceBuf,
+                  s_pad.connected() ? "connected" : "advertising");
 }
 
 void printAngles() {
@@ -117,6 +122,13 @@ void serialTask(void *) {
 void processSample(const ImuSample &s) {
     s_stats.onValidSample(s.rxMs);
     s_pipeline.feed(s, s_out);
+    if (!s_out.calibrating && s_out.anglesValid) {
+        const StickOut st = mapTilt(s_out.rollDeg, s_out.pitchDeg, STICK_DEADZONE_DEG,
+                                    STICK_FULLSCALE_DEG, STICK_X_SIGN, STICK_Y_SIGN);
+        s_pad.setStick(st.x, st.y);
+    } else {
+        s_pad.setStick(0.0f, 0.0f);  // calibrating or angles unusable: centred
+    }
     if (s_out.calJustCompleted) {
         const Vec3 bias = s_pipeline.calibration().gyroBias;
         Serial.printf("[cal] done: gyro bias=(%+.3f %+.3f %+.3f) rad/s, |g|=%.2f m/s^2\n",
@@ -174,6 +186,7 @@ void processTask(void *) {
         switch (s_gate.update(live)) {
             case GateAction::Release:
                 s_pipeline.onDataLost(now);
+                s_pad.releaseAll();
                 Serial.printf("[safe] no valid data for %lu ms - inputs released\n",
                               static_cast<unsigned long>(s_stats.msSinceLastValid(now)));
                 break;
@@ -182,6 +195,13 @@ void processTask(void *) {
                 break;
             case GateAction::None:
                 break;
+        }
+
+        s_pad.update(now);
+        const bool padConnected = s_pad.connected();
+        if (padConnected != s_padWasConnected) {
+            s_padWasConnected = padConnected;
+            Serial.println(padConnected ? "[ble] host connected" : "[ble] host disconnected - advertising");
         }
 
         if (s_angles && now - lastAngles >= DEBUG_ANGLES_PERIOD_MS) {
@@ -200,7 +220,7 @@ void processTask(void *) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(500);  // let the USB-serial monitor attach
-    Serial.println("\n=== ESP32 phone motion controller - phases 2-3 ===");
+    Serial.println("\n=== ESP32 phone motion controller - phases 2-4 ===");
 
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
@@ -217,6 +237,8 @@ void setup() {
 
     s_stats.reset(millis());
     s_pipeline.begin();
+    s_pad.begin();
+    Serial.printf("[ble] advertising as \"%s\" (HID gamepad)\n", BLE_DEVICE_NAME);
 
     xTaskCreatePinnedToCore(processTask, "process", TASK_STACK_PROCESS, nullptr, TASK_PRIO_PROCESS,
                             nullptr, TASK_CORE_APP);
