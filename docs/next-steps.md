@@ -1,9 +1,9 @@
 # Next steps
 
-Current state: Phases 1-3 are implemented, build clean for `esp32dev` and
-`esp32s3`, pass the native test suite, and are flashed to the ESP32
-(ESP32-D0WD-V3). The live simulator/phone streaming check over the SoftAP is
-still outstanding - see below.
+Current state: Phases 1-3 are done and verified on hardware with a real phone.
+Phase 4 (BLE gamepad) works on branch `phase4-ble`: the laptop pairs with
+"MotionCtl Pad", tilt drives the left stick (all four directions checked) and a
+lost stream centres the stick within ~0.5 s. Merge it to `main` when ready.
 
 ## 1. Remaining verification for phases 2-3
 
@@ -15,13 +15,15 @@ still outstanding - see below.
 
 Details: [testing.md](testing.md), [axes.md](axes.md).
 
-## 2. Phase 4 - BLE gamepad
+## 2. Phase 4 follow-ups
 
-- BLE HID gamepad (lemmingDev/ESP32-BLE-Gamepad on NimBLE-Arduino; check current docs first) + CachyOS pairing steps.
-- Wire the `OutputGate` actions to real button/stick release: `GateAction::Release` must clear inputs, `Resume` re-enables them.
-- Map calibrated roll/pitch to the analog stick (dead zone and full scale constants already exist as Phase 3 leftovers in the branch work, not in `main`).
-- Note: Wi-Fi AP and BLE share the 2.4 GHz radio; measure added latency before trusting swing timing.
-- Flash headroom on the classic DevKit is tight (~70% of a 1.31 MB app partition used); this may need a custom partition table.
+- [ ] Merge `phase4-ble` into `main`.
+- [ ] Flash headroom: the app is ~91% of the default 1.31 MB partition. Add a custom partition table (e.g. `huge_app.csv`) before Phase 5.
+- [ ] Measure added latency from running Wi-Fi and BLE together before trusting swing timing.
+- [ ] Beyond ~75 deg of nose-up the angles are "unusable" and the stick snaps from full to centre; consider holding full deflection instead.
+- [ ] The resting pose can read a few degrees off the calibrated neutral (observed roll +8, pitch -6); this exceeds the 5 deg dead zone. Recalibrate, or widen `STICK_DEADZONE_DEG`.
+- [ ] Buttons (Start / Recal / Mode) are defined but not wired to the gamepad yet.
+- [ ] Serial once printed `ertising` in a tight loop after a flash; cleared by a hard reset. Watch for a repeat.
 
 ## 3. Later phases
 

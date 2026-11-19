@@ -23,9 +23,9 @@ A Wii-Remote-style motion controller for tennis/cricket PC games.
 | Phase | What | State |
 |---|---|---|
 | 1 | Scaffold, `config.h`, SoftAP, raw UDP dump to serial, `phone_sim.py`, `udp_sniff.py` | Done; flashed and running on the ESP32. |
-| 2 | CSV parser, packet stats, 500 ms safety timeout | Implemented, unit-tested, flashed. Live stream check outstanding. |
-| 3 | Calibration + complementary filter, roll/pitch at 10 Hz | Implemented, unit-tested, flashed. Live tilt check outstanding. |
-| 4 | BLE gamepad (buttons + analog stick) and CachyOS pairing steps | Not started |
+| 2 | CSV parser, packet stats, 500 ms safety timeout | Done; verified with the simulator and a real phone (HyperIMU at 20 ms, 0 malformed). |
+| 3 | Calibration + complementary filter, roll/pitch at 10 Hz | Done; calibration and angles verified on a real phone (gyro units confirmed rad/s). |
+| 4 | BLE gamepad (analog stick from tilt) and CachyOS pairing steps | Done on branch `phase4-ble`: pairs on Linux, X/Y axes and safety release verified. Buttons are defined but not driven yet. See [docs/pairing.md](docs/pairing.md). |
 | 5 | Swing detection, tennis classification, tuning mode, remaining tools | Not started |
 | 6 | Cricket mode, Mode button, LED states | Not started |
 | 7 | Optional ESP32 web dashboard | Not started |
