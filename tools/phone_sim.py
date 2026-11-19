@@ -2,8 +2,10 @@
 """Fake phone: sends CSV sensor packets over UDP so the ESP32 can be tested
 without the real phone.
 
-Packet format (matches the firmware default column order in config.h):
-    timestamp_ms,ax,ay,az,gx,gy,gz
+Packet format (matches the firmware default column order in config.h, which
+follows the real HyperIMU stream - no timestamp column):
+    ax,ay,az,gx,gy,gz
+Pass --timestamp to prepend a timestamp_ms column (needs config.h to match).
 Units: accel in m/s^2 (INCLUDING gravity), gyro in rad/s - same as Android's
 TYPE_ACCELEROMETER / TYPE_GYROSCOPE.
 
@@ -77,6 +79,8 @@ def main() -> None:
     ap.add_argument("--duration", type=float, default=5.0,
                     help="seconds (ignored for 'sequence')")
     ap.add_argument("--loop", action="store_true", help="repeat forever")
+    ap.add_argument("--timestamp", action="store_true",
+                    help="prepend a timestamp_ms column (default: none, like the real phone)")
     args = ap.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -95,7 +99,9 @@ def main() -> None:
                 while (now := time.monotonic()) - seg_start < length:
                     vals = sample(name, now - seg_start)
                     ts_ms = int((now - t0_global) * 1000)
-                    line = f"{ts_ms}," + ",".join(f"{v:.4f}" for v in vals)
+                    line = ",".join(f"{v:.4f}" for v in vals)
+                    if args.timestamp:
+                        line = f"{ts_ms}," + line
                     sock.sendto(line.encode("ascii"), dest)
                     sent += 1
                     next_send += period
