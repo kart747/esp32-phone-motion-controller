@@ -6,7 +6,19 @@
 
 namespace {
 
-CsvLayout layout() { return CsvLayout::fromConfig(); }
+// Explicit layout (timestamp, ax, ay, az, gx, gy, gz) so these tests do not
+// depend on the user-editable column mapping in config.h.
+CsvLayout layout() {
+    CsvLayout l = CsvLayout::fromConfig();
+    l.colTimestamp = 0;
+    l.colAx = 1;
+    l.colAy = 2;
+    l.colAz = 3;
+    l.colGx = 4;
+    l.colGy = 5;
+    l.colGz = 6;
+    return l;
+}
 
 size_t lenOf(const char *s) { return strlen(s); }
 
