@@ -1,8 +1,8 @@
 # Raw UDP payloads from a real phone (HyperIMU) captured over the MotionCtl SoftAP, 2026-11-19.
 # Source: ESP32 serial 'raw' dump, device 192.168.4.3 -> 192.168.4.1:5555.
 # Format: 6 CSV columns, NO timestamp column: ax,ay,az,gx,gy,gz
-# Units: accel m/s^2 including gravity (|a| ~ 9.75 with the phone held still and tilted), gyro presumed rad/s (not yet confirmed by rotating the phone).
-# Rate observed: ~10 packets/s (about 100 ms apart) - far too low for calibration/swing detection; raise it in the app.
+# Units: accel m/s^2 including gravity (|a| ~ 9.75 with the phone held still and tilted), gyro rad/s (confirmed: a ~67 deg roll integrated to 1.16 on gy).
+# Rate observed: ~10 packets/s (about 100 ms apart) - too low for calibration (DT_MAX_S = 0.1 s); set HyperIMU to 20 ms (~50 Hz).
 # Each real payload ends with CR LF (stripped below). Note some values use scientific notation, e.g. 8.25E-4.
 0.81795,5.4799504,8.02095,0.0017875,-0.0064625,-0.005775
 0.84000003,5.3580003,8.067,0.00385,0.0011,-0.004675

@@ -7,11 +7,11 @@ still outstanding - see below.
 
 ## 1. Remaining verification for phases 2-3
 
-- [ ] Join `MotionCtl` from the laptop, run `python3 tools/phone_sim.py --scenario sequence`, and confirm `samples` rises with `malformed=0`.
-- [ ] Confirm `[cal] done` appears and `[angles]` tracks tilts with the documented signs.
-- [ ] Confirm the 500 ms timeout: stop the stream, expect `[safe] ... inputs released`; restart, expect `[safe] valid data again`.
-- [ ] Real phone: point the sensor app (HyperIMU) at UDP `192.168.4.1:5555`, accel + gyro enabled, then use `raw` to check the column order and units against `config.h`. The defaults assume `timestamp_ms,ax,ay,az,gx,gy,gz` in m/s² and rad/s.
-- [ ] Save 10-20 raw lines from the real phone into `docs/phone-packet-sample.txt`.
+- [x] Join `MotionCtl` from the laptop, run `python3 tools/phone_sim.py --scenario sequence`, and confirm `samples` rises with `malformed=0`. (Done: 1620/1620 samples, 0 malformed.)
+- [x] Confirm `[cal] done` appears and `[angles]` tracks tilts. (Done with the simulator and the real phone; the physical tilt directions are not yet independently confirmed.)
+- [x] Confirm the 500 ms timeout: stop the stream, expect `[safe] ... inputs released`; restart, expect `[safe] valid data again`. (Done: ~502 ms, recovers.)
+- [x] Real phone: point the sensor app (HyperIMU) at UDP `192.168.4.1:5555`, accel + gyro enabled, then use `raw` to check the column order and units against `config.h`. The real HyperIMU stream is `ax,ay,az,gx,gy,gz` (no timestamp) in m/s² and rad/s, now the `config.h` default. Set the app interval to 20 ms: at 100 ms calibration cannot finish.
+- [x] Save 10-20 raw lines from the real phone into `docs/phone-packet-sample.txt`.
 
 Details: [testing.md](testing.md), [axes.md](axes.md).
 
