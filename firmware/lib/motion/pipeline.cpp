@@ -53,4 +53,7 @@ void OrientationPipeline::feed(const ImuSample &s, PipelineOutput &out) {
     out.pitchDeg = wrapDeg(filter_.pitchDeg() - pitchRef_);
     out.nearSingularity = GravityFilter::nearSingularity(out.pitchDeg);
     out.anglesValid = !out.nearSingularity;
+    out.gyro = gyro;
+    out.up = filter_.gravity();
+    out.dtS = dt;
 }

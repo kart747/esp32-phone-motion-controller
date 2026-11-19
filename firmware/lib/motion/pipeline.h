@@ -18,6 +18,10 @@ struct PipelineOutput {
     bool        nearSingularity = false;  // roll is ill-defined at this pitch
     bool        calJustCompleted = false;  // this sample finished calibration
     float       calProgress = 0.0f;       // 0..1 while calibrating
+    // Valid when !calibrating (used by the gyro mouse):
+    Vec3        gyro;                     // rad/s, bias removed, device frame
+    Vec3        up{0.0f, 0.0f, 1.0f};     // unit gravity direction, device frame
+    float       dtS = 0.0f;               // seconds since the previous sample
 };
 
 class OrientationPipeline {
