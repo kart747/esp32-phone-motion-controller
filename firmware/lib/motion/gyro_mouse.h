@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 
+#include "config.h"
 #include "vec3.h"
 
 struct MouseSettings {
@@ -24,6 +25,12 @@ struct MouseSettings {
     uint32_t clickReleaseHoldMs;
     int16_t  maxStep;       // largest dx/dy returned by one take()
     int32_t  maxBacklog;    // pending movement is capped at +-this
+
+    static MouseSettings fromConfig() {
+        return {MOUSE_GAIN_COUNTS_PER_RAD, MOUSE_RATE_DEADZONE_RAD_S, MOUSE_X_SIGN,
+                MOUSE_Y_SIGN,              MOUSE_CLICK_ON_RAD_S,      MOUSE_CLICK_OFF_RAD_S,
+                MOUSE_CLICK_RELEASE_HOLD_MS, MOUSE_MAX_STEP,          MOUSE_MAX_BACKLOG};
+    }
 };
 
 struct MouseReport {

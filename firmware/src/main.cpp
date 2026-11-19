@@ -1,6 +1,7 @@
-// Phases 2-4: CSV parse -> counters/watchdog -> calibration -> gravity filter
-// -> roll/pitch -> analog stick on a BLE HID gamepad. The safety rule (no
-// valid data for DATA_TIMEOUT_MS) centres the stick and releases all inputs.
+// Phases 2-5: CSV parse -> counters/watchdog -> calibration -> gravity filter
+// -> either an analog stick on a BLE HID gamepad (tilt) or a BLE HID mouse
+// (gyro), chosen by OUTPUT_MODE in config.h. The safety rule (no valid data for
+// DATA_TIMEOUT_MS) centres the stick / stops the cursor and releases buttons.
 #include <Arduino.h>
 #include <IPAddress.h>
 
@@ -9,6 +10,8 @@
 
 #include "config.h"
 #include "gamepad_ble.h"
+#include "gyro_mouse.h"
+#include "mouse_ble.h"
 #include "net_udp.h"
 #include "output_gate.h"
 #include "packet_stats.h"
@@ -25,7 +28,13 @@ PacketStats s_stats;
 OrientationPipeline s_pipeline;
 OutputGate s_gate;
 GamepadBle s_pad;
+MouseBle s_mouse;
+GyroMouse s_gyroMouse;
 bool s_padWasConnected = false;
+
+bool outputConnected() {
+    return OUTPUT_MODE == OutputMode::Gamepad ? s_pad.connected() : s_mouse.connected();
+}
 PipelineOutput s_out;
 
 std::atomic<bool> s_rawDump{DUMP_RAW};
@@ -65,7 +74,7 @@ void printStats(uint32_t nowMs) {
                   static_cast<unsigned long>(s_stats.truncated()),
                   static_cast<unsigned long>(s_stats.queueDrops()),
                   s_stats.packetsPerSec(), s_stats.samplesPerSec(), sinceBuf,
-                  s_pad.connected() ? "connected" : "advertising");
+                  outputConnected() ? "connected" : "advertising");
 }
 
 void printAngles() {
@@ -122,12 +131,20 @@ void serialTask(void *) {
 void processSample(const ImuSample &s) {
     s_stats.onValidSample(s.rxMs);
     s_pipeline.feed(s, s_out);
-    if (!s_out.calibrating && s_out.anglesValid) {
-        const StickOut st = mapTilt(s_out.rollDeg, s_out.pitchDeg, STICK_DEADZONE_DEG,
-                                    STICK_FULLSCALE_DEG, STICK_X_SIGN, STICK_Y_SIGN);
-        s_pad.setStick(st.x, st.y);
+    if (OUTPUT_MODE == OutputMode::Gamepad) {
+        if (!s_out.calibrating && s_out.anglesValid) {
+            const StickOut st = mapTilt(s_out.rollDeg, s_out.pitchDeg, STICK_DEADZONE_DEG,
+                                        STICK_FULLSCALE_DEG, STICK_X_SIGN, STICK_Y_SIGN);
+            s_pad.setStick(st.x, st.y);
+        } else {
+            s_pad.setStick(0.0f, 0.0f);  // calibrating or angles unusable: centred
+        }
     } else {
-        s_pad.setStick(0.0f, 0.0f);  // calibrating or angles unusable: centred
+        if (!s_out.calibrating) {
+            s_gyroMouse.feed(s_out.gyro, s_out.up, s_out.dtS, s.rxMs, MouseSettings::fromConfig());
+        } else {
+            s_gyroMouse.reset();  // gyro bias not known yet: keep the cursor still
+        }
     }
     if (s_out.calJustCompleted) {
         const Vec3 bias = s_pipeline.calibration().gyroBias;
@@ -186,7 +203,8 @@ void processTask(void *) {
         switch (s_gate.update(live)) {
             case GateAction::Release:
                 s_pipeline.onDataLost(now);
-                s_pad.releaseAll();
+                if (OUTPUT_MODE == OutputMode::Gamepad) s_pad.releaseAll();
+                else s_mouse.releaseAll(s_gyroMouse);
                 Serial.printf("[safe] no valid data for %lu ms - inputs released\n",
                               static_cast<unsigned long>(s_stats.msSinceLastValid(now)));
                 break;
@@ -197,8 +215,9 @@ void processTask(void *) {
                 break;
         }
 
-        s_pad.update(now);
-        const bool padConnected = s_pad.connected();
+        if (OUTPUT_MODE == OutputMode::Gamepad) s_pad.update(now);
+        else s_mouse.update(now, s_gyroMouse);
+        const bool padConnected = outputConnected();
         if (padConnected != s_padWasConnected) {
             s_padWasConnected = padConnected;
             Serial.println(padConnected ? "[ble] host connected" : "[ble] host disconnected - advertising");
@@ -220,7 +239,7 @@ void processTask(void *) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(500);  // let the USB-serial monitor attach
-    Serial.println("\n=== ESP32 phone motion controller - phases 2-4 ===");
+    Serial.println("\n=== ESP32 phone motion controller - phases 2-5 ===");
 
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
@@ -237,8 +256,13 @@ void setup() {
 
     s_stats.reset(millis());
     s_pipeline.begin();
-    s_pad.begin();
-    Serial.printf("[ble] advertising as \"%s\" (HID gamepad)\n", BLE_DEVICE_NAME);
+    if (OUTPUT_MODE == OutputMode::Gamepad) {
+        s_pad.begin();
+        Serial.printf("[ble] advertising as \"%s\" (HID gamepad)\n", BLE_DEVICE_NAME);
+    } else {
+        s_mouse.begin();
+        Serial.printf("[ble] advertising as \"%s\" (HID mouse)\n", BLE_MOUSE_NAME);
+    }
 
     xTaskCreatePinnedToCore(processTask, "process", TASK_STACK_PROCESS, nullptr, TASK_PRIO_PROCESS,
                             nullptr, TASK_CORE_APP);
