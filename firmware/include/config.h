@@ -125,6 +125,32 @@ constexpr int16_t  GAMEPAD_AXIS_MAX     = 32767;  // HID axis range is -MAX..MAX
 constexpr uint32_t GAMEPAD_REPORT_INTERVAL_MS = 20;  // at most 50 stick reports/s
 constexpr uint8_t  GAMEPAD_BUTTON_COUNT = 8;
 
+// ------------------------------------------------------- Output device mode
+// The board is ONE Bluetooth HID device: either the tilt-stick gamepad or the
+// gyro mouse. Pick at build time (pair again with the host after switching;
+// the two use different device names).
+enum class OutputMode : uint8_t { Gamepad, Mouse };
+constexpr OutputMode OUTPUT_MODE        = OutputMode::Mouse;
+
+// ----------------------------------------------------- Gyro mouse (BLE HID)
+constexpr char     BLE_MOUSE_NAME[]     = "MotionCtl Mouse";
+// Cursor counts per radian turned. ~500 = about 9 counts per degree.
+constexpr float    MOUSE_GAIN_COUNTS_PER_RAD = 500.0f;
+// Turning slower than this is ignored (stops residual gyro noise creeping).
+constexpr float    MOUSE_RATE_DEADZONE_RAD_S = 0.08f;
+// dx = X_SIGN * (turn rate about "up"), dy = Y_SIGN * (pitch rate, gyro x).
+// Turn left -> cursor left; nose up -> cursor up (screen Y grows downward).
+constexpr float    MOUSE_X_SIGN         = -1.0f;
+constexpr float    MOUSE_Y_SIGN         = -1.0f;
+// Auto-click (hold to slice): left button is held while the phone turns faster
+// than ON, and released after it stays below OFF for the hold time.
+constexpr float    MOUSE_CLICK_ON_RAD_S  = 1.5f;
+constexpr float    MOUSE_CLICK_OFF_RAD_S = 0.7f;
+constexpr uint32_t MOUSE_CLICK_RELEASE_HOLD_MS = 80;
+constexpr uint32_t MOUSE_REPORT_INTERVAL_MS = 8;   // ~125 reports/s
+constexpr int16_t  MOUSE_MAX_STEP       = 127;     // HID relative report limit
+constexpr int32_t  MOUSE_MAX_BACKLOG    = 2000;    // drop movement queued beyond this
+
 // --------------------------------------------------------------- Debug
 constexpr bool     DUMP_RAW             = false;  // print every raw payload
 constexpr bool     DUMP_HEX             = false;  // ...plus a hex view
