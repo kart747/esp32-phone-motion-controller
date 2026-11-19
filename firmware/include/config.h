@@ -61,14 +61,16 @@ constexpr uint32_t PROCESS_WAKE_MS      = 10;
 // ------------------------------------------------------- Phone packet format
 // CSV, one sample per line. Column indices are 0-based; -1 = column absent.
 // Extra columns are ignored. Update after checking a real raw dump (`raw on`).
+// Matches the real HyperIMU stream (docs/phone-packet-sample.txt): six columns,
+// no timestamp, so sample timing comes from packet arrival time.
 constexpr char     CSV_DELIMITER        = ',';
-constexpr int      CSV_COL_TIMESTAMP    = 0;
-constexpr int      CSV_COL_AX           = 1;
-constexpr int      CSV_COL_AY           = 2;
-constexpr int      CSV_COL_AZ           = 3;
-constexpr int      CSV_COL_GX           = 4;
-constexpr int      CSV_COL_GY           = 5;
-constexpr int      CSV_COL_GZ           = 6;
+constexpr int      CSV_COL_TIMESTAMP    = -1;
+constexpr int      CSV_COL_AX           = 0;
+constexpr int      CSV_COL_AY           = 1;
+constexpr int      CSV_COL_AZ           = 2;
+constexpr int      CSV_COL_GX           = 3;
+constexpr int      CSV_COL_GY           = 4;
+constexpr int      CSV_COL_GZ           = 5;
 // Unit conversion to what the firmware uses (m/s^2 and rad/s, seconds).
 constexpr double   TIMESTAMP_TO_SECONDS = 0.001;     // 0.001 if the app sends ms
 constexpr float    ACCEL_SCALE_TO_MS2   = 1.0f;      // use 9.80665 if the app sends g
