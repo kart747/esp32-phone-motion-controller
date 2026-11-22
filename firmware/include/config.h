@@ -176,6 +176,16 @@ constexpr float    SWING_MAX_ONSET_TILT_DEG = 60.0f;
 // One left click per recognised swing in mouse mode.
 constexpr uint32_t SWING_CLICK_HOLD_MS   = 80;
 
+// Mouse click mode:
+//   Stroke - one short click per RECOGNISED swing (needs tuned thresholds).
+//   Speed  - left button held automatically while the phone turns fast and
+//            released after it slows down; for slicing games (Fruit Ninja).
+enum class MouseClickMode : uint8_t { Stroke, Speed };
+constexpr MouseClickMode MOUSE_CLICK_MODE = MouseClickMode::Speed;
+constexpr float    MOUSE_CLICK_ON_RAD_S  = 1.5f;   // press when turning faster than this
+constexpr float    MOUSE_CLICK_OFF_RAD_S = 0.7f;   // release after slower than this...
+constexpr uint32_t MOUSE_CLICK_RELEASE_HOLD_MS = 80;  // ...for this long
+
 // ------------------------------------------------------- Buttons (Phase 6)
 // Active-low: wired to GND, internal pull-up. Debounce and long-press guard.
 constexpr uint32_t BTN_DEBOUNCE_MS       = 30;

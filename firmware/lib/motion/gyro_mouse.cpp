@@ -33,6 +33,28 @@ void GyroMouse::feed(const Vec3 &gyro, const Vec3 &up, float dtS, const MouseSet
     fracY_ += s.ySign * applyDeadzone(pitchRate, s.rateDeadzoneRadS) * s.gainCountsPerRad * dtS;
     drain(fracX_, pendX_, s.maxBacklog);
     drain(fracY_, pendY_, s.maxBacklog);
+
+    if (!s.speedClick) {
+        speedPressed_ = false;
+        slowForS_ = 0.0f;
+        return;
+    }
+    // Speed click on the un-deadzoned rates, with hysteresis and a release hold.
+    const float speed = sqrtf(yawRate * yawRate + pitchRate * pitchRate);
+    if (!speedPressed_) {
+        if (speed >= s.clickOnRadS) {
+            speedPressed_ = true;
+            slowForS_ = 0.0f;
+        }
+    } else if (speed < s.clickOffRadS) {
+        slowForS_ += dtS;
+        if (slowForS_ * 1000.0f >= static_cast<float>(s.clickReleaseHoldMs)) {
+            speedPressed_ = false;
+            slowForS_ = 0.0f;
+        }
+    } else {
+        slowForS_ = 0.0f;  // fast again: restart the release hold
+    }
 }
 
 void GyroMouse::triggerClick(uint32_t nowMs, const MouseSettings &s) {
@@ -48,6 +70,8 @@ void GyroMouse::triggerClick(uint32_t nowMs, const MouseSettings &s) {
 void GyroMouse::clearClick() {
     pressed_ = false;
     pressStartedMs_ = 0;
+    speedPressed_ = false;
+    slowForS_ = 0.0f;
 }
 
 void GyroMouse::updatePulse(uint32_t nowMs, uint32_t holdMs) {
@@ -65,7 +89,7 @@ MouseReport GyroMouse::take(const MouseSettings &s, uint32_t nowMs) {
     pendY_ -= dy;
     r.dx = static_cast<int16_t>(dx);
     r.dy = static_cast<int16_t>(dy);
-    r.pressed = pressed_;
+    r.pressed = pressed_ || speedPressed_;
     return r;
 }
 
@@ -74,4 +98,6 @@ void GyroMouse::reset() {
     pendX_ = pendY_ = 0;
     pressed_ = false;
     pressStartedMs_ = 0;
+    speedPressed_ = false;
+    slowForS_ = 0.0f;
 }

@@ -36,6 +36,22 @@ void drainAll(GyroMouse &m, long &sx, long &sy) {
     }
 }
 
+MouseSettings speedSettings() {
+    MouseSettings s = settings();
+    s.speedClick = true;
+    s.clickOnRadS = MOUSE_CLICK_ON_RAD_S;
+    s.clickOffRadS = MOUSE_CLICK_OFF_RAD_S;
+    s.clickReleaseHoldMs = MOUSE_CLICK_RELEASE_HOLD_MS;
+    return s;
+}
+
+// Feed `seconds` of constant gyro at 100 Hz with the speed-click settings.
+void runSpeed(GyroMouse &m, Vec3 gyro, float seconds) {
+    const MouseSettings s = speedSettings();
+    for (int i = 0; i < static_cast<int>(seconds * 100.0f + 0.5f); i++)
+        m.feed(gyro, kFlatUp, 0.01f, s);
+}
+
 }  // namespace
 
 void setUp() {}
@@ -225,6 +241,50 @@ void test_bad_input_is_ignored() {
     TEST_ASSERT_FALSE(r.pressed);
 }
 
+void test_speed_click_holds_while_turning_fast() {
+    GyroMouse m;
+    runSpeed(m, {0, 0, 0.5f}, 1.0f);               // slow turn: no click
+    TEST_ASSERT_FALSE(m.take(speedSettings(), 0).pressed);
+    runSpeed(m, {0, 0, 3.0f}, 0.1f);               // fast slice: held
+    TEST_ASSERT_TRUE(m.take(speedSettings(), 0).pressed);
+    runSpeed(m, {0, 0, 1.0f}, 0.5f);               // between OFF and ON: still held
+    TEST_ASSERT_TRUE(m.pressed());
+}
+
+void test_speed_click_releases_after_the_hold() {
+    GyroMouse m;
+    runSpeed(m, {0, 0, 3.0f}, 0.1f);
+    runSpeed(m, {0, 0, 0.2f}, 0.05f);              // slow, shorter than the hold
+    TEST_ASSERT_TRUE(m.pressed());
+    runSpeed(m, {0, 0, 0.2f}, 0.1f);               // past the hold: released
+    TEST_ASSERT_FALSE(m.take(speedSettings(), 0).pressed);
+}
+
+void test_speed_click_fast_again_restarts_the_hold() {
+    GyroMouse m;
+    runSpeed(m, {0, 0, 3.0f}, 0.1f);
+    runSpeed(m, {0, 0, 0.2f}, 0.05f);
+    runSpeed(m, {0, 0, 3.0f}, 0.05f);
+    runSpeed(m, {0, 0, 0.2f}, 0.05f);
+    TEST_ASSERT_TRUE(m.pressed());
+}
+
+void test_speed_click_off_when_disabled() {
+    GyroMouse m;
+    run(m, {0, 0, 3.0f}, kFlatUp, 0.5f);           // default settings: speedClick = false
+    TEST_ASSERT_FALSE(m.take(settings(), 0).pressed);
+}
+
+void test_speed_click_cleared_by_safety_release_and_reset() {
+    GyroMouse m;
+    runSpeed(m, {0, 0, 3.0f}, 0.1f);
+    m.clearClick();
+    TEST_ASSERT_FALSE(m.pressed());
+    runSpeed(m, {0, 0, 3.0f}, 0.1f);
+    m.reset();
+    TEST_ASSERT_FALSE(m.take(speedSettings(), 0).pressed);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_still_phone_does_not_move);
@@ -246,5 +306,10 @@ int main(int, char **) {
     RUN_TEST(test_zero_hold_disables_clicks);
     RUN_TEST(test_reset_clears_movement_and_click);
     RUN_TEST(test_bad_input_is_ignored);
+    RUN_TEST(test_speed_click_holds_while_turning_fast);
+    RUN_TEST(test_speed_click_releases_after_the_hold);
+    RUN_TEST(test_speed_click_fast_again_restarts_the_hold);
+    RUN_TEST(test_speed_click_off_when_disabled);
+    RUN_TEST(test_speed_click_cleared_by_safety_release_and_reset);
     return UNITY_END();
 }

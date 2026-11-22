@@ -369,7 +369,8 @@ void onSwingEnd(const SwingFeatures &f, uint32_t nowMs) {
 
     // One bounded click per recognised stroke, and only when the user has left
     // swing output enabled.
-    if (hit && s_control.state().swingOutputEnabled && OUTPUT_MODE == OutputMode::Mouse) {
+    if (hit && s_control.state().swingOutputEnabled && OUTPUT_MODE == OutputMode::Mouse &&
+        MOUSE_CLICK_MODE == MouseClickMode::Stroke) {
         s_gyroMouse.triggerClick(nowMs, ms);  // ignored if a pulse is still active
         if (s_gyroMouse.pulseActive()) s_clickCount++;
     }
@@ -551,7 +552,9 @@ void processSample(const ImuSample &s) {
         }
     } else {
         if (!s_out.calibrating) {
-            s_gyroMouse.feed(s_out.gyro, s_out.up, s_out.dtS, MouseSettings::fromConfig());
+            MouseSettings ms = MouseSettings::fromConfig();
+            ms.speedClick = ms.speedClick && s_control.state().swingOutputEnabled;  // "click off"
+            s_gyroMouse.feed(s_out.gyro, s_out.up, s_out.dtS, ms);
         } else {
             s_gyroMouse.reset();  // gyro bias not known yet: keep the cursor still
         }

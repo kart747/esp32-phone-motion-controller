@@ -10,10 +10,15 @@
 // Fractional movement is accumulated, so slow turns still add up instead of
 // being rounded away.
 //
-// The click is NOT speed based: a stroke is signalled by the gesture detector
-// via triggerClick(), which starts one bounded press/hold/release. A second
-// trigger during a pulse is ignored and counted, so a burst of swings cannot
-// leave the button stuck down or produce a surprise click later.
+// Two click sources:
+//  * Stroke: a recognised swing calls triggerClick(), which starts one bounded
+//    press/hold/release. A second trigger during a pulse is ignored and
+//    counted, so a burst of swings cannot leave the button stuck down.
+//  * Speed (settings.speedClick): the button is held while the phone turns
+//    faster than clickOnRadS and released after it has stayed below
+//    clickOffRadS for clickReleaseHoldMs (hysteresis, no flicker). Time is
+//    measured from the samples' dt, so it needs no clock.
+// The reported button is down if either source holds it.
 #pragma once
 
 #include <stdint.h>
@@ -28,11 +33,20 @@ struct MouseSettings {
     uint32_t clickHoldMs;   // press duration for one recognised swing
     int16_t  maxStep;       // largest dx/dy returned by one take()
     int32_t  maxBacklog;    // pending movement is capped at +-this
+    bool     speedClick = false;       // hold the button while turning fast
+    float    clickOnRadS = 1.5f;
+    float    clickOffRadS = 0.7f;
+    uint32_t clickReleaseHoldMs = 80;
 
     static MouseSettings fromConfig() {
-        return {MOUSE_GAIN_COUNTS_PER_RAD, MOUSE_RATE_DEADZONE_RAD_S, MOUSE_X_SIGN,
-                MOUSE_Y_SIGN,             SWING_CLICK_HOLD_MS,        MOUSE_MAX_STEP,
-                MOUSE_MAX_BACKLOG};
+        MouseSettings s{MOUSE_GAIN_COUNTS_PER_RAD, MOUSE_RATE_DEADZONE_RAD_S, MOUSE_X_SIGN,
+                        MOUSE_Y_SIGN,             SWING_CLICK_HOLD_MS,        MOUSE_MAX_STEP,
+                        MOUSE_MAX_BACKLOG};
+        s.speedClick = MOUSE_CLICK_MODE == MouseClickMode::Speed;
+        s.clickOnRadS = MOUSE_CLICK_ON_RAD_S;
+        s.clickOffRadS = MOUSE_CLICK_OFF_RAD_S;
+        s.clickReleaseHoldMs = MOUSE_CLICK_RELEASE_HOLD_MS;
+        return s;
     }
 };
 
@@ -61,8 +75,9 @@ public:
     // Drop all movement and the click (stream lost, recalibrating...).
     void reset();
 
-    bool    pressed() const { return pressed_; }
+    bool    pressed() const { return pressed_ || speedPressed_; }
     bool    pulseActive() const { return pressed_; }
+    bool    speedPressed() const { return speedPressed_; }
     uint32_t ignoredTriggers() const { return ignoredTriggers_; }
 
 private:
@@ -73,4 +88,6 @@ private:
     bool     pressed_ = false;
     uint32_t pressStartedMs_ = 0;
     uint32_t ignoredTriggers_ = 0;
+    bool     speedPressed_ = false;
+    float    slowForS_ = 0.0f;           // time spent below clickOffRadS while pressed
 };
