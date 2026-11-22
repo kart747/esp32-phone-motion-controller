@@ -136,8 +136,10 @@ constexpr OutputMode OUTPUT_MODE        = OutputMode::Mouse;
 
 // ----------------------------------------------------- Gyro mouse (BLE HID)
 constexpr char     BLE_MOUSE_NAME[]     = "MotionCtl Mouse";
-// Cursor counts per radian turned. ~500 = about 9 counts per degree.
-constexpr float    MOUSE_GAIN_COUNTS_PER_RAD = 500.0f;
+// Cursor counts per radian turned (200 = ~3.5 per degree). Kept low so even a
+// fast swing fits in the BLE report budget (no queued lag); the game scales
+// it up with its own boost setting.
+constexpr float    MOUSE_GAIN_COUNTS_PER_RAD = 200.0f;
 // Turning slower than this is ignored (stops residual gyro noise creeping).
 constexpr float    MOUSE_RATE_DEADZONE_RAD_S = 0.08f;
 // dx = X_SIGN * (turn rate about "up"), dy = Y_SIGN * (pitch rate, gyro x).
@@ -146,7 +148,7 @@ constexpr float    MOUSE_X_SIGN         = -1.0f;
 constexpr float    MOUSE_Y_SIGN         = -1.0f;
 constexpr uint32_t MOUSE_REPORT_INTERVAL_MS = 8;   // ~125 reports/s
 constexpr int16_t  MOUSE_MAX_STEP       = 127;     // HID relative report limit
-constexpr int32_t  MOUSE_MAX_BACKLOG    = 2000;    // drop movement queued beyond this
+constexpr int32_t  MOUSE_MAX_BACKLOG    = 254;     // ~2 reports: drop the rest so a swing never lags behind
 
 // ------------------------------------------------- Swing detection (tennis)
 // NOTE: every value below is a starting guess, NOT measured. Tune them against
