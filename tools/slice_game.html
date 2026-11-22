@@ -29,7 +29,7 @@
   <h1 id="title">Fruit Slice</h1>
   <p id="msg">Swing the phone to move the blade. A fast swing holds the mouse button, which makes the blade cut.
      Slice the fruit, don't let it fall, and never hit a bomb.</p>
-  <p class="small">Click (or swing) to start &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
+  <p class="small">Click (or swing) to start &middot; P: practice (no lives lost) &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
 </div>
 <script>
 (() => {
@@ -50,10 +50,11 @@
     { name:'melon',  r:46, skin:'#2f9e44', flesh:'#ff5f6d' },
     { name:'plum',   r:30, skin:'#8e44c9', flesh:'#ffe0a3' },
   ];
-  const G = 900;                       // gravity, px/s^2
+  const G = 650;                       // gravity, px/s^2 (lower = fruit floats longer)
+  const LIVES = 5, HIT_PAD = 25;       // forgiving: blade counts 25 px outside the fruit
   let fruits = [], halves = [], drops = [], trail = [];
-  let score = 0, lives = 3, best = +(safeGet('slice_best') || 0), running = false;
-  let needButton = true, buttonDown = false, spawnT = 0, level = 0, lastT = 0, slicedThisSwing = 0;
+  let score = 0, lives = LIVES, best = +(safeGet('slice_best') || 0), running = false;
+  let practice = false, needButton = true, buttonDown = false, spawnT = 0, level = 0, lastT = 0, slicedThisSwing = 0;
   let mouse = { x: W / 2, y: H / 2, speed: 0 };
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -79,13 +80,14 @@
   window.addEventListener('keydown', e => {
     if (e.key === 'b' || e.key === 'B') needButton = !needButton;
     if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.();
+    if (e.key === 'p' || e.key === 'P') practice = !practice;
     if (e.key === ' ' && !running) start();
   });
 
   // ---------------------------------------------------------------- game
   function start() {
     fruits = []; halves = []; drops = []; trail = [];
-    score = 0; lives = 3; level = 0; spawnT = 0.5; running = true;
+    score = 0; lives = LIVES; level = 0; spawnT = 0.8; running = true;
     $('overlay').classList.add('hidden');
   }
   function gameOver(why) {
@@ -103,9 +105,9 @@
   function popText(s, x, y) { texts.push({ s, x, y, life: 1 }); }
 
   function spawnWave() {
-    const n = 1 + Math.floor(Math.random() * Math.min(4, 1 + level / 4));
+    const n = 1 + Math.floor(Math.random() * Math.min(3, 1 + level / 8));
     for (let i = 0; i < n; i++) {
-      const bomb = Math.random() < Math.min(0.22, 0.06 + level * 0.01);
+      const bomb = level > 5 && Math.random() < Math.min(0.15, 0.03 + level * 0.006);
       const f = bomb ? { name:'bomb', r:30, skin:'#222', flesh:'#222', bomb:true }
                      : FRUITS[Math.floor(Math.random() * FRUITS.length)];
       const x = W * (0.15 + Math.random() * 0.7);
@@ -129,9 +131,9 @@
     const ang = Math.atan2(y1 - y0, x1 - x0);
     for (let i = fruits.length - 1; i >= 0; i--) {
       const f = fruits[i];
-      if (!hitsCircle(x0, y0, x1, y1, f.x, f.y, f.r)) continue;
+      if (!hitsCircle(x0, y0, x1, y1, f.x, f.y, f.r + HIT_PAD)) continue;
       fruits.splice(i, 1);
-      if (f.bomb) { boom(f); gameOver('You hit a bomb!'); return; }
+      if (f.bomb) { boom(f); if (practice) { popText('Bomb!', f.x, f.y); continue; } gameOver('You hit a bomb!'); return; }
       score++; slicedThisSwing++;
       const nx = -Math.sin(ang), ny = Math.cos(ang);       // perpendicular to the cut
       for (const s of [-1, 1]) {
@@ -155,14 +157,14 @@
   function step(dt) {
     if (running) {
       spawnT -= dt;
-      if (spawnT <= 0) { spawnWave(); spawnT = Math.max(0.7, 2.0 - level * 0.04); }
+      if (spawnT <= 0) { spawnWave(); spawnT = Math.max(1.0, 2.6 - level * 0.03); }
     }
     for (let i = fruits.length - 1; i >= 0; i--) {
       const f = fruits[i];
       f.vy += G * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.a += f.va * dt;
       if (f.vy > 0 && f.y > H + 60) {
         fruits.splice(i, 1);
-        if (running && !f.bomb) { lives--; popText('Missed!', f.x, H - 40); if (lives <= 0) gameOver('Too many fruit fell.'); }
+        if (running && !f.bomb && !practice) { lives--; popText('Missed!', f.x, H - 40); if (lives <= 0) gameOver('Too many fruit fell.'); }
       }
     }
     for (const h of halves) { h.vy += G * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.a += h.va * dt; h.life -= dt; }
@@ -221,7 +223,7 @@
     ctx.globalAlpha = 1;
 
     $('score').textContent = `Score ${score}`;
-    $('lives').textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    $('lives').textContent = practice ? 'PRACTICE (P)' : '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, LIVES - lives));
     $('best').textContent = `Best ${best}`;
     $('dbg').textContent = `button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · cursor speed ${mouse.speed.toFixed(0)} px/event`;
   }
