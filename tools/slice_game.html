@@ -8,7 +8,7 @@
   :root { --bg1:#1d2b3a; --bg2:#0d141c; --text:#f4f1e8; --muted:#9fb0c0; --accent:#ffd34d; --bad:#ff5a5a; }
   html, body { margin:0; height:100%; overflow:hidden; background:var(--bg2); color:var(--text);
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; user-select:none; }
-  canvas { display:block; width:100vw; height:100vh; cursor:crosshair; }
+  canvas { display:block; width:100vw; height:100vh; cursor:none; }
   #hud { position:fixed; top:12px; left:16px; right:16px; display:flex; justify-content:space-between;
          pointer-events:none; font-size:22px; font-weight:600; text-shadow:0 2px 4px #0008; }
   #dbg { position:fixed; bottom:10px; left:16px; font:13px ui-monospace, monospace; color:var(--muted);
@@ -29,7 +29,7 @@
   <h1 id="title">Fruit Slice</h1>
   <p id="msg">Swing the phone to move the blade. A fast swing holds the mouse button, which makes the blade cut.
      Slice the fruit, don't let it fall, and never hit a bomb.</p>
-  <p class="small">Click (or swing) to start &middot; P: practice (no lives lost) &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
+  <p class="small">Click (or swing) to start &middot; [ ]: blade speed &middot; P: practice (no lives lost) &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
 </div>
 <script>
 (() => {
@@ -61,8 +61,27 @@
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
   // ---------------------------------------------------------------- input
+  // ---- sword mapping ---------------------------------------------------
+  // With pointer lock the browser hands us the RAW counts from the board, with
+  // no desktop pointer acceleration, so the blade moves exactly as fast as the
+  // swing and stops dead when the phone stops. BOOST scales it up so a normal
+  // wrist swing crosses the screen. [ and ] change it.
+  let boost = +(safeGet('slice_boost') || 4);
+  let blade = { x: W / 2, y: H / 2 };
+  const locked = () => document.pointerLockElement === cv;
+  function lock() {
+    if (locked() || !cv.requestPointerLock) return;
+    const p = cv.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) p.catch(() => cv.requestPointerLock());
+  }
+
   function onMove(e) {
-    const nx = e.clientX, ny = e.clientY;
+    let nx = e.clientX, ny = e.clientY;
+    if (locked()) {
+      blade.x = Math.max(0, Math.min(W, blade.x + e.movementX * boost));
+      blade.y = Math.max(0, Math.min(H, blade.y + e.movementY * boost));
+      nx = blade.x; ny = blade.y;
+    }
     const dist = Math.hypot(nx - mouse.x, ny - mouse.y);
     mouse.speed = mouse.speed * 0.7 + dist * 0.3;
     buttonDown = (e.buttons & 1) === 1;
@@ -75,12 +94,15 @@
   }
   cv.addEventListener('pointermove', onMove);
   cv.addEventListener('pointerdown', e => { buttonDown = true; slicedThisSwing = 0;
-                                            if (!running) start(); onMove(e); });
+                                            if (!locked()) { lock(); blade = { x: mouse.x, y: mouse.y }; }
+                                            if (!running) start(); });
   window.addEventListener('pointerup', () => { buttonDown = false; combo(); });
   window.addEventListener('keydown', e => {
     if (e.key === 'b' || e.key === 'B') needButton = !needButton;
     if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.();
     if (e.key === 'p' || e.key === 'P') practice = !practice;
+    if (e.key === ']') { boost = Math.min(12, boost + 1); safeSet('slice_boost', boost); }
+    if (e.key === '[') { boost = Math.max(1, boost - 1); safeSet('slice_boost', boost); }
     if (e.key === ' ' && !running) start();
   });
 
@@ -225,7 +247,7 @@
     $('score').textContent = `Score ${score}`;
     $('lives').textContent = practice ? 'PRACTICE (P)' : '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, LIVES - lives));
     $('best').textContent = `Best ${best}`;
-    $('dbg').textContent = `button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · cursor speed ${mouse.speed.toFixed(0)} px/event`;
+    $('dbg').textContent = `${locked() ? 'sword (raw input)' : 'click to grab the blade'} · boost ${boost}x ([ ]) · button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · Esc releases the cursor`;
   }
 
   function frame(t) {
