@@ -19,6 +19,10 @@ public:
     // auto-click state. While no host is paired the movement is discarded.
     void update(uint32_t nowMs, GyroMouse &motion);
 
+    // Forget every stored pairing (fixes a host that can no longer pair after
+    // it removed the device on its side). The host must pair again.
+    void clearBonds();
+
     // Safety release: drop queued movement and release every button now.
     void releaseAll(GyroMouse &motion);
 

@@ -17,6 +17,10 @@ bool MouseBle::begin() {
     return true;
 }
 
+void MouseBle::clearBonds() {
+    if (s_mouse) s_mouse->clearBonds();
+}
+
 bool MouseBle::connected() const { return s_mouse && s_mouse->isPaired(); }
 
 void MouseBle::releaseAll(GyroMouse &motion) {

@@ -132,6 +132,7 @@ std::atomic<bool> s_tuning{false};   // per-sample CSV records for the tools
 std::atomic<bool> s_statsRequest{false};
 std::atomic<bool> s_tuneDumpRequest{false};
 std::atomic<bool> s_recalRequest{false};
+std::atomic<bool> s_unpairRequest{false};
 
 // Queue one diagnostic line for the serial task (never blocks).
 void logLine(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -198,7 +199,7 @@ void printAngles() {
 
 void printCommandHelp() {
     Serial.println("[cmd] recal | raw | hex | angles | stats | tune on/off | get | "
-                   "set <key> <value> | defaults | sport tennis|cricket | mode | click on|off");
+                   "set <key> <value> | defaults | sport tennis|cricket | mode | click on|off | unpair");
 }
 
 // Submit a command to the owner (process task). Non-blocking: a burst of
@@ -283,6 +284,8 @@ void serialTask(void *) {
                         submit(cmdSetSwingOutput(true));
                     } else if (!strcmp(line, "click off")) {
                         submit(cmdSetSwingOutput(false));
+                    } else if (!strcmp(line, "unpair")) {
+                        s_unpairRequest = true;  // handled on the process task
                     } else {
                         printCommandHelp();
                     }
@@ -650,6 +653,11 @@ void processTask(void *) {
 
         if (OUTPUT_MODE == OutputMode::Gamepad) s_pad.update(now);
         else s_mouse.update(now, s_gyroMouse);
+        if (s_unpairRequest.exchange(false) && OUTPUT_MODE == OutputMode::Mouse) {
+            s_mouse.releaseAll(s_gyroMouse);
+            s_mouse.clearBonds();
+            logLine("[ble] all pairings forgotten - pair the host again");
+        }
 
         const bool connected = outputConnected();
         if (connected != s_outputWasConnected) {
