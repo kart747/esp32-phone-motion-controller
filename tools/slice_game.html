@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fruit Slice</title>
+<style>
+  :root { --bg1:#1d2b3a; --bg2:#0d141c; --text:#f4f1e8; --muted:#9fb0c0; --accent:#ffd34d; --bad:#ff5a5a; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg2); color:var(--text);
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif; user-select:none; }
+  canvas { display:block; width:100vw; height:100vh; cursor:crosshair; }
+  #hud { position:fixed; top:12px; left:16px; right:16px; display:flex; justify-content:space-between;
+         pointer-events:none; font-size:22px; font-weight:600; text-shadow:0 2px 4px #0008; }
+  #dbg { position:fixed; bottom:10px; left:16px; font:13px ui-monospace, monospace; color:var(--muted);
+         pointer-events:none; }
+  #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:center; gap:14px; background:#0009; text-align:center; padding:16px; }
+  #overlay h1 { margin:0; font-size:52px; color:var(--accent); }
+  #overlay p { margin:0; max-width:560px; color:var(--text); line-height:1.5; font-size:17px; }
+  #overlay .small { color:var(--muted); font-size:14px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="score">Score 0</span><span id="lives"></span><span id="best">Best 0</span></div>
+<div id="dbg"></div>
+<div id="overlay">
+  <h1 id="title">Fruit Slice</h1>
+  <p id="msg">Swing the phone to move the blade. A fast swing holds the mouse button, which makes the blade cut.
+     Slice the fruit, don't let it fall, and never hit a bomb.</p>
+  <p class="small">Click (or swing) to start &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize); resize();
+
+  const FRUITS = [
+    { name:'apple',  r:34, skin:'#e8333b', flesh:'#fff3c4' },
+    { name:'orange', r:36, skin:'#ff9a1f', flesh:'#ffd27a' },
+    { name:'lime',   r:30, skin:'#5ccf3a', flesh:'#d9ff9e' },
+    { name:'melon',  r:46, skin:'#2f9e44', flesh:'#ff5f6d' },
+    { name:'plum',   r:30, skin:'#8e44c9', flesh:'#ffe0a3' },
+  ];
+  const G = 900;                       // gravity, px/s^2
+  let fruits = [], halves = [], drops = [], trail = [];
+  let score = 0, lives = 3, best = +(safeGet('slice_best') || 0), running = false;
+  let needButton = true, buttonDown = false, spawnT = 0, level = 0, lastT = 0, slicedThisSwing = 0;
+  let mouse = { x: W / 2, y: H / 2, speed: 0 };
+
+  function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  // ---------------------------------------------------------------- input
+  function onMove(e) {
+    const nx = e.clientX, ny = e.clientY;
+    const dist = Math.hypot(nx - mouse.x, ny - mouse.y);
+    mouse.speed = mouse.speed * 0.7 + dist * 0.3;
+    buttonDown = (e.buttons & 1) === 1;
+    const cutting = !needButton || buttonDown;
+    if (cutting && running) {
+      trail.push({ x: nx, y: ny, t: performance.now() });
+      cutSegment(mouse.x, mouse.y, nx, ny);
+    }
+    mouse.x = nx; mouse.y = ny;
+  }
+  cv.addEventListener('pointermove', onMove);
+  cv.addEventListener('pointerdown', e => { buttonDown = true; slicedThisSwing = 0;
+                                            if (!running) start(); onMove(e); });
+  window.addEventListener('pointerup', () => { buttonDown = false; combo(); });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'b' || e.key === 'B') needButton = !needButton;
+    if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.();
+    if (e.key === ' ' && !running) start();
+  });
+
+  // ---------------------------------------------------------------- game
+  function start() {
+    fruits = []; halves = []; drops = []; trail = [];
+    score = 0; lives = 3; level = 0; spawnT = 0.5; running = true;
+    $('overlay').classList.add('hidden');
+  }
+  function gameOver(why) {
+    running = false;
+    if (score > best) { best = score; safeSet('slice_best', String(best)); }
+    $('title').textContent = 'Game over';
+    $('msg').textContent = `${why} You scored ${score}. Click or swing to play again.`;
+    $('overlay').classList.remove('hidden');
+  }
+  function combo() {
+    if (slicedThisSwing >= 3) { score += slicedThisSwing; popText(`Combo +${slicedThisSwing}`, mouse.x, mouse.y); }
+    slicedThisSwing = 0;
+  }
+  const texts = [];
+  function popText(s, x, y) { texts.push({ s, x, y, life: 1 }); }
+
+  function spawnWave() {
+    const n = 1 + Math.floor(Math.random() * Math.min(4, 1 + level / 4));
+    for (let i = 0; i < n; i++) {
+      const bomb = Math.random() < Math.min(0.22, 0.06 + level * 0.01);
+      const f = bomb ? { name:'bomb', r:30, skin:'#222', flesh:'#222', bomb:true }
+                     : FRUITS[Math.floor(Math.random() * FRUITS.length)];
+      const x = W * (0.15 + Math.random() * 0.7);
+      const peak = H * (0.15 + Math.random() * 0.35);         // how high it flies
+      const vy = -Math.sqrt(2 * G * (H + 40 - peak));
+      const vx = (W / 2 - x) * (0.25 + Math.random() * 0.5) + (Math.random() - 0.5) * 120;
+      fruits.push({ ...f, x, y: H + 40, vx, vy, a: Math.random() * 6, va: (Math.random() - 0.5) * 6 });
+    }
+    level++;
+  }
+
+  // segment p0-p1 vs circle: closest distance from the centre to the segment
+  function hitsCircle(x0, y0, x1, y1, cx, cy, r) {
+    const dx = x1 - x0, dy = y1 - y0, L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? ((cx - x0) * dx + (cy - y0) * dy) / L2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const px = x0 + t * dx - cx, py = y0 + t * dy - cy;
+    return px * px + py * py <= r * r;
+  }
+  function cutSegment(x0, y0, x1, y1) {
+    const ang = Math.atan2(y1 - y0, x1 - x0);
+    for (let i = fruits.length - 1; i >= 0; i--) {
+      const f = fruits[i];
+      if (!hitsCircle(x0, y0, x1, y1, f.x, f.y, f.r)) continue;
+      fruits.splice(i, 1);
+      if (f.bomb) { boom(f); gameOver('You hit a bomb!'); return; }
+      score++; slicedThisSwing++;
+      const nx = -Math.sin(ang), ny = Math.cos(ang);       // perpendicular to the cut
+      for (const s of [-1, 1]) {
+        halves.push({ ...f, side: s, cut: ang, vx: f.vx + s * nx * 140, vy: f.vy * 0.4 + s * ny * 140 - 80,
+                      va: s * 4, life: 2.5 });
+      }
+      for (let k = 0; k < 14; k++) {
+        const a = Math.random() * Math.PI * 2, v = 80 + Math.random() * 260;
+        drops.push({ x: f.x, y: f.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 100, c: f.flesh, life: 0.8 });
+      }
+    }
+  }
+  function boom(f) {
+    for (let k = 0; k < 60; k++) {
+      const a = Math.random() * Math.PI * 2, v = 100 + Math.random() * 500;
+      drops.push({ x: f.x, y: f.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, c: k % 2 ? '#ffb02e' : '#ff3b30', life: 1.2 });
+    }
+  }
+
+  // ---------------------------------------------------------------- loop
+  function step(dt) {
+    if (running) {
+      spawnT -= dt;
+      if (spawnT <= 0) { spawnWave(); spawnT = Math.max(0.7, 2.0 - level * 0.04); }
+    }
+    for (let i = fruits.length - 1; i >= 0; i--) {
+      const f = fruits[i];
+      f.vy += G * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.a += f.va * dt;
+      if (f.vy > 0 && f.y > H + 60) {
+        fruits.splice(i, 1);
+        if (running && !f.bomb) { lives--; popText('Missed!', f.x, H - 40); if (lives <= 0) gameOver('Too many fruit fell.'); }
+      }
+    }
+    for (const h of halves) { h.vy += G * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.a += h.va * dt; h.life -= dt; }
+    halves = halves.filter(h => h.life > 0 && h.y < H + 100);
+    for (const d of drops) { d.vy += G * 0.6 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.life -= dt; }
+    drops = drops.filter(d => d.life > 0);
+    for (const t of texts) { t.y -= 40 * dt; t.life -= dt; }
+    for (let i = texts.length - 1; i >= 0; i--) if (texts[i].life <= 0) texts.splice(i, 1);
+    const now = performance.now();
+    trail = trail.filter(p => now - p.t < 160);
+    mouse.speed *= 0.9;
+  }
+
+  function drawFruit(f, half) {
+    ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(half ? f.cut : f.a);
+    ctx.beginPath();
+    if (half) ctx.arc(0, 0, f.r, half > 0 ? 0 : Math.PI, half > 0 ? Math.PI : Math.PI * 2);
+    else ctx.arc(0, 0, f.r, 0, Math.PI * 2);
+    ctx.fillStyle = f.skin; ctx.fill();
+    if (half) { ctx.beginPath(); ctx.ellipse(0, 0, f.r * 0.85, f.r * 0.18, 0, 0, Math.PI * 2);
+                ctx.fillStyle = f.flesh; ctx.fill(); }
+    else if (f.bomb) {
+      ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(12, 12); ctx.moveTo(12, -12); ctx.lineTo(-12, 12); ctx.stroke();
+      ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(f.r * 0.6, -f.r * 0.9, 5, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = '#ffffff55'; ctx.beginPath(); ctx.arc(-f.r * 0.35, -f.r * 0.35, f.r * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#1d2b3a'); g.addColorStop(1, '#0d141c');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    for (const d of drops) { ctx.globalAlpha = Math.max(0, d.life); ctx.fillStyle = d.c;
+                             ctx.beginPath(); ctx.arc(d.x, d.y, 4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    for (const h of halves) drawFruit(h, h.side);
+    for (const f of fruits) drawFruit(f, 0);
+    // blade trail
+    if (trail.length > 1) {
+      const now = performance.now();
+      for (let i = 1; i < trail.length; i++) {
+        const a = 1 - (now - trail[i].t) / 160;
+        ctx.strokeStyle = `rgba(255,255,255,${Math.max(0, a)})`; ctx.lineWidth = 2 + 8 * a; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(trail[i - 1].x, trail[i - 1].y); ctx.lineTo(trail[i].x, trail[i].y); ctx.stroke();
+      }
+    }
+    // cursor: ring turns yellow while the blade is cutting
+    const cutting = !needButton || buttonDown;
+    ctx.strokeStyle = cutting ? '#ffd34d' : '#9fb0c0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mouse.x, mouse.y, cutting ? 12 : 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = '600 24px system-ui'; ctx.textAlign = 'center';
+    for (const t of texts) { ctx.globalAlpha = Math.max(0, t.life); ctx.fillStyle = '#ffd34d'; ctx.fillText(t.s, t.x, t.y); }
+    ctx.globalAlpha = 1;
+
+    $('score').textContent = `Score ${score}`;
+    $('lives').textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    $('best').textContent = `Best ${best}`;
+    $('dbg').textContent = `button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · cursor speed ${mouse.speed.toFixed(0)} px/event`;
+  }
+
+  function frame(t) {
+    const dt = Math.min(0.05, (t - (lastT || t)) / 1000); lastT = t;
+    step(dt); draw(); requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
