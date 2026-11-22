@@ -81,22 +81,22 @@ void test_clock_prefers_timestamps_and_rejects_gaps() {
     a.hasTimestamp = true;
     a.tsSec = 1.000;
     a.rxMs = 5000;
-    c.next(a);  // first sample: nominal interval, not a real delta
-    TEST_ASSERT_TRUE(c.discontinuity());
+    c.next(a);  // first sample has no previous interval to measure
+    TEST_ASSERT_FALSE(c.gap());
 
     ImuSample b;
     b.hasTimestamp = true;
     b.tsSec = 1.010;
     b.rxMs = 9183;  // arrival time is jittery, timestamp is not
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.010f, c.next(b));
-    TEST_ASSERT_FALSE(c.discontinuity());
+    TEST_ASSERT_FALSE(c.gap());
 
     ImuSample gap;
     gap.hasTimestamp = true;
     gap.tsSec = 2.000;  // 990 ms gap
     gap.rxMs = 10000;
     const float dt = c.next(gap);
-    TEST_ASSERT_TRUE(c.discontinuity());
+    TEST_ASSERT_TRUE(c.gap());
     TEST_ASSERT_TRUE(dt > 0.0f && dt <= DT_MAX_S);
 }
 
@@ -114,7 +114,7 @@ void test_clock_handles_out_of_order_timestamps() {
     b.tsSec = 4.990;  // went backwards: fall back to arrival time
     b.rxMs = 1010;
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.010f, c.next(b));
-    TEST_ASSERT_FALSE(c.discontinuity());
+    TEST_ASSERT_FALSE(c.gap());
 }
 
 void test_clock_without_timestamps_uses_arrival() {
@@ -128,7 +128,42 @@ void test_clock_without_timestamps_uses_arrival() {
     b.hasTimestamp = false;
     b.rxMs = 2020;
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.020f, c.next(b));
-    TEST_ASSERT_FALSE(c.discontinuity());
+    TEST_ASSERT_FALSE(c.gap());
+}
+
+// Several samples travelling in one datagram share an arrival time. That is
+// normal batching, not a data gap, so it must not be reported as one.
+void test_clock_treats_batched_samples_as_normal() {
+    SampleClock c;
+    c.reset();
+    for (int k = 0; k < 4; k++) {
+        ImuSample s;
+        s.hasTimestamp = false;
+        s.rxMs = 5000;  // same datagram
+        const float dt = c.next(s);
+        TEST_ASSERT_FALSE(c.gap());
+        TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f / NOMINAL_SAMPLE_RATE_HZ, dt);
+    }
+    ImuSample next;
+    next.hasTimestamp = false;
+    next.rxMs = 5040;  // next datagram, 40 ms later
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.040f, c.next(next));
+    TEST_ASSERT_FALSE(c.gap());
+}
+
+// 50 Hz (20 ms) is the rate the real phone runs at: it must never look like a gap.
+void test_clock_accepts_real_phone_rate() {
+    SampleClock c;
+    c.reset();
+    ImuSample s;
+    s.hasTimestamp = false;
+    s.rxMs = 1000;
+    c.next(s);
+    for (int i = 0; i < 10; i++) {
+        s.rxMs += 20;
+        TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.020f, c.next(s));
+        TEST_ASSERT_FALSE(c.gap());
+    }
 }
 
 int main(int, char **) {
@@ -142,5 +177,7 @@ int main(int, char **) {
     RUN_TEST(test_clock_prefers_timestamps_and_rejects_gaps);
     RUN_TEST(test_clock_handles_out_of_order_timestamps);
     RUN_TEST(test_clock_without_timestamps_uses_arrival);
+    RUN_TEST(test_clock_treats_batched_samples_as_normal);
+    RUN_TEST(test_clock_accepts_real_phone_rate);
     return UNITY_END();
 }

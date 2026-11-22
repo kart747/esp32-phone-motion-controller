@@ -8,7 +8,8 @@ static const float RAD_TO_DEG_F = 57.29577951f;
 
 // ------------------------------------------------------------ Calibrator
 void Calibrator::start(uint32_t nowMs) {
-    lastFailure_ = "";
+    // Keep lastFailure_ so the reason for the previous rejection survives the
+    // restart; resetFailures() is what clears it.
     state_ = State::Collecting;
     restartWindow(nowMs, nullptr);
 }

@@ -38,7 +38,7 @@ void MouseBle::update(uint32_t nowMs, GyroMouse &motion) {
         return;
     }
 
-    const MouseReport r = motion.take(MouseSettings::fromConfig());
+    const MouseReport r = motion.take(MouseSettings::fromConfig(), nowMs);
     if (r.pressed != buttonDown_) {
         buttonDown_ = r.pressed;
         s_mouse->setButton(MouseButton::Left, r.pressed);

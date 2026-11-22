@@ -47,9 +47,11 @@ constexpr uint32_t UDP_POLL_INTERVAL_MS = 1;     // idle sleep of the rx task
 
 // ------------------------------------------------------ FreeRTOS plumbing
 constexpr size_t   UDP_QUEUE_LEN        = 16;    // raw packets buffered
+constexpr size_t   CMD_QUEUE_LEN        = 8;     // pending commands (serial/buttons/web)
 constexpr uint32_t TASK_STACK_UDP       = 4096;
 constexpr uint32_t TASK_STACK_PROCESS   = 6144;
 constexpr uint32_t TASK_STACK_SERIAL    = 4096;
+constexpr uint32_t TASK_STACK_BUTTONS   = 2048;
 constexpr unsigned TASK_PRIO_UDP        = 3;
 constexpr unsigned TASK_PRIO_PROCESS    = 2;
 constexpr unsigned TASK_PRIO_SERIAL     = 1;
@@ -142,14 +144,82 @@ constexpr float    MOUSE_RATE_DEADZONE_RAD_S = 0.08f;
 // Turn left -> cursor left; nose up -> cursor up (screen Y grows downward).
 constexpr float    MOUSE_X_SIGN         = -1.0f;
 constexpr float    MOUSE_Y_SIGN         = -1.0f;
-// Auto-click (hold to slice): left button is held while the phone turns faster
-// than ON, and released after it stays below OFF for the hold time.
-constexpr float    MOUSE_CLICK_ON_RAD_S  = 1.5f;
-constexpr float    MOUSE_CLICK_OFF_RAD_S = 0.7f;
-constexpr uint32_t MOUSE_CLICK_RELEASE_HOLD_MS = 80;
 constexpr uint32_t MOUSE_REPORT_INTERVAL_MS = 8;   // ~125 reports/s
 constexpr int16_t  MOUSE_MAX_STEP       = 127;     // HID relative report limit
 constexpr int32_t  MOUSE_MAX_BACKLOG    = 2000;    // drop movement queued beyond this
+
+// ------------------------------------------------- Swing detection (tennis)
+// NOTE: every value below is a starting guess, NOT measured. Tune them against
+// real swings (see docs/testing.md); `set <key> <value>` changes them at
+// runtime.
+//
+// Segmentation: IDLE -> (|gyro| >= SWING_ONSET_RAD_S) CAPTURE -> classify
+//            -> COOLDOWN -> (time up AND quiet) IDLE
+constexpr float    SWING_ONSET_RAD_S     = 2.5f;   // starts a capture
+constexpr float    SWING_END_RAD_S       = 1.2f;   // below this counts as quiet
+constexpr uint32_t SWING_END_HOLD_MS     = 40;     // quiet this long ends the capture
+constexpr uint32_t SWING_POST_PEAK_MS    = 150;    // ...or this long after the peak
+constexpr uint32_t SWING_MAX_MS          = 500;    // hard cap on capture length
+constexpr uint32_t SWING_COOLDOWN_MS     = 400;    // ignore new swings after one ends
+// Classification
+constexpr float    SWING_MIN_INTEGRAL_RAD = 0.5f;  // dominant-axis rotation needed
+constexpr float    SWING_DOMINANCE_RATIO  = 1.3f;  // dominant must beat the next axis
+constexpr float    TENNIS_MIN_PEAK_RAD_S  = 4.0f;  // weaker movements are ignored
+constexpr float    LOB_MIN_UP_ACCEL_MS2   = 6.0f;  // "strong upward component"
+constexpr float    SERVE_ONSET_PITCH_MIN_DEG = 40.0f;  // started raised overhead
+// Handedness: +1 right-handed, -1 left-handed. Mirrors forehand/backhand.
+constexpr float    FOREHAND_YAW_SIGN      = 1.0f;
+// A swing that starts this far from the calibrated neutral pose is reported as
+// unsupported rather than classified confidently.
+constexpr float    SWING_MAX_ONSET_TILT_DEG = 60.0f;
+
+// One left click per recognised swing in mouse mode.
+constexpr uint32_t SWING_CLICK_HOLD_MS   = 80;
+
+// ------------------------------------------------------- Buttons (Phase 6)
+// Active-low: wired to GND, internal pull-up. Debounce and long-press guard.
+constexpr uint32_t BTN_DEBOUNCE_MS       = 30;
+// A second press within this window is ignored (double-tap protection).
+constexpr uint32_t BTN_MIN_GAP_MS        = 120;
+
+// ----------------------------------------------------------- LED (Phase 6)
+// 16-slot patterns, one bit per LED_SLOT_MS. 1 = lit.
+constexpr uint32_t LED_SLOT_MS           = 100;
+constexpr uint16_t LED_PAT_ERROR         = 0x00FF;  // rapid blink
+constexpr uint16_t LED_PAT_CALIBRATING   = 0x0F0F;  // medium blink
+constexpr uint16_t LED_PAT_AP_UP         = 0x0001;  // brief flick, mostly dark
+constexpr uint16_t LED_PAT_STREAMING     = 0x0F00;  // blink twice as long
+constexpr uint16_t LED_PAT_BLE_ONLY      = 0x0101;  // sparse double tick
+constexpr uint16_t LED_PAT_RUNNING       = 0xFFFF;  // solid on
+// Mode flash after a change: N short blinks (1 = tennis, 2 = cricket).
+constexpr uint32_t LED_MODE_FLASH_ON_MS    = 120;
+constexpr uint32_t LED_MODE_FLASH_PERIOD_MS = 280;
+constexpr uint32_t LED_MODE_FLASH_TOTAL_MS  = 700;
+constexpr uint32_t LED_UPDATE_PERIOD_MS     = 20;
+
+// --------------------------------------------------- Dashboard (Phase 7)
+// Served from the same SoftAP. The page is embedded in the firmware, so no
+// filesystem is needed.
+constexpr bool     ENABLE_DASHBOARD     = true;
+constexpr uint16_t HTTP_PORT            = 80;
+constexpr size_t   API_MAX_BODY         = 512;   // largest accepted POST body
+constexpr uint32_t TASK_STACK_WEB       = 8192;  // WebServer needs headroom
+constexpr unsigned TASK_PRIO_WEB        = 1;     // below packet processing
+constexpr uint32_t WEB_POLL_MS          = 2;     // how often the web task polls
+// Bearer token required for every write (apply/save/defaults). Reads are open
+// on the AP. Leave empty to disable write auth, which is ONLY sensible on a
+// network you fully control - see docs/dashboard.md.
+constexpr char     DASHBOARD_TOKEN[]    = "";
+
+// ------------------------------------------------- Cricket (Phase 6)
+// Also guesses. A defensive block is a short, low-energy movement; it still has
+// to clear SWING_ONSET_RAD_S, so anything below that is not detected at all.
+constexpr float    CRICKET_DEFENSIVE_MAX_PEAK_RAD_S = 6.0f;
+constexpr uint32_t CRICKET_DEFENSIVE_MAX_MS         = 180;
+// A loft needs more upward acceleration than a tennis lob (harder hit).
+constexpr float    CRICKET_LOFT_MIN_UP_ACCEL_MS2    = 10.0f;
+// 1 = a pull counts to either side, 0 = only the handedness-matched side.
+constexpr float    CRICKET_PULL_BOTH_SIGNS          = 1.0f;
 
 // --------------------------------------------------------------- Debug
 constexpr bool     DUMP_RAW             = false;  // print every raw payload

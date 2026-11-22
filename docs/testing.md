@@ -75,8 +75,141 @@ Hold the phone flat and still after boot (or after sending `recal`):
 [angles] roll=+0.2 pitch=-0.1 deg
 ```
 
+## Phase 5 - swing detection, classification and mouse clicks
+
+Set HyperIMU to **20 ms (50 Hz)**; at 10 Hz the sample interval exceeds
+`DT_MAX_S` and calibration never completes.
+
 `[angles]` prints at 10 Hz (`DEBUG_ANGLES_PERIOD_MS`). Tilt the phone: right edge
 down gives positive roll, nose up gives positive pitch (see `docs/axes.md`).
+
+### Serial commands added in Phase 5
+
+| Command | Effect |
+|---|---|
+| `tune on` / `tune off` | stream CSV sample (`S,`) and swing (`W,`) records for the tools |
+| `get` | dump the tunables currently in force (`T,key=value`) |
+| `set <key> <value>` | change one threshold at runtime; rejected if unknown, out of range, or if the resulting combination is inconsistent |
+| `defaults` | restore every threshold from `config.h` |
+| `sport tennis` / `sport cricket` / `mode` | select or toggle the sport |
+| `click on` / `click off` / `click` | enable, disable or toggle the click on recognised swings |
+
+Runtime changes are not saved automatically. Persist them with **Save to
+device** on the dashboard ([dashboard.md](dashboard.md)); the mode and click
+switch set over serial are saved the same way.
+
+### Reading the swing log
+
+Each detected movement produces one line:
+
+```
+[swing] forehand peak=8.1 rad/s dur=260 ms yaw=1.28 pitch=0.00
+[swing] rejected (roll_dominant) peak=7.9 rad/s
+```
+
+Rejection reasons:
+
+| Reason | Meaning |
+|---|---|
+| `weak` | peak rate below `TENNIS_MIN_PEAK_RAD_S`: fidgeting, not a stroke |
+| `small_integral` | energetic but almost no net rotation |
+| `ambiguous` | the dominant axis does not clearly beat the next one |
+| `roll_dominant` | wrist roll (rotation about the phone's long axis) |
+| `no_up_accel` | an upward pitch swing without the upward acceleration a lob needs |
+| `downswing_not_overhead` | a downward swing that did not start from a raised pose |
+| `unsupported_pose` | the swing began too far from the calibrated neutral pose |
+
+A recognised stroke in mouse mode also fires **one** left click (press, then
+release after `SWING_CLICK_HOLD_MS`). Cursor movement is unchanged. A second
+swing during a click is ignored rather than queued.
+
+### Recording real swings (do this before trusting any threshold)
+
+Every default threshold is a **guess**. Record your own strokes, then tune.
+
+```bash
+cd firmware && pio device monitor          # terminal 1: watch the logs
+python3 tools/serial_logger.py --port /dev/ttyUSB0 \
+    --label forehand --count 20 --note "right hand, phone flat"
+```
+
+Hold the phone still for ~1.5 s first so calibration finishes, then swing. The
+script writes `data/<stamp>_<label>_samples.csv`, `_swings.csv` and `_meta.txt`
+(the tunables in force). `data/` is gitignored: recordings are personal.
+
+Record for every stroke (`--label forehand|backhand|lob|serve`), plus idle and
+deliberate fast non-swings. Keep at least one session you do **not** tune on, so
+accuracy can be measured on data the thresholds never saw.
+
+Then examine and iterate:
+
+```bash
+python3 tools/plot_swings.py data/<stamp>_forehand_samples.csv --out swings.png
+python3 tools/plot_swings.py data/<stamp>_forehand_samples.csv --summary
+```
+
+### Replaying a recording through the firmware logic
+
+`tools/replay_swings.cpp` links the **same** `lib/motion` sources the ESP32
+builds, so thresholds are evaluated against recorded data without reflashing:
+
+```bash
+g++ -std=c++17 -O2 -I firmware/include -I firmware/lib/motion \
+    tools/replay_swings.cpp firmware/lib/motion/{parser,pipeline,imu_filter,sample_clock,gestures,tunables}.cpp \
+    -o /tmp/replay_swings
+
+/tmp/replay_swings data/<stamp>_forehand_samples.csv data/<stamp>_forehand_swings.csv
+```
+
+It prints the gesture the firmware would produce for each swing next to the
+recorded one, with `MATCH`/`MISS`, plus a summary of recognised vs rejected.
+Adjust a value with `set` on the device, re-record, and confirm the change before
+making it the `config.h` default.
+
+Not covered by replay: the UDP transport, the BLE adapters and task scheduling.
+
+## Phase 6 - cricket, buttons and LED
+
+**Sport mode** (`sport cricket` or the Mode button) switches the classifier to
+cricket: drive, pull, loft and defensive. A recognised cricket stroke still
+makes one left click in mouse mode; gamepad mode keeps driving the stick only.
+
+**Buttons** (active-low to GND, internal pull-up):
+
+| Button | Pin (ESP32 / S3) | Action |
+|---|---|---|
+| Start | 25 / 5 | toggle the click on recognised swings |
+| Recalibrate | 26 / 6 | same as `recal` |
+| Mode | 27 / 7 | toggle tennis / cricket |
+
+A button held while the board boots is adopted silently rather than firing, and
+presses closer than `BTN_MIN_GAP_MS` are ignored.
+
+**LED patterns** (`LED_PAT_*` in `config.h`): solid = running (streaming +
+BLE), long blink = streaming only, short blink = calibrating, rapid blink =
+error, mostly dark = idle. A mode change flashes once for tennis and twice for
+cricket, but an error always wins over that flash.
+
+## Phase 7 - dashboard
+
+See [dashboard.md](dashboard.md). Quick check that the page is served:
+
+```bash
+curl -s http://192.168.4.1/api/status     # live JSON, no token needed
+```
+
+### Automated tests
+
+```bash
+cd firmware && pio test -e native    # 159 cases across 10 suites
+python3 tools/test_tools.py          # host tool record parsing
+```
+
+The suites cover the CSV parser, counters and watchdog, orientation, stick and
+mouse, gesture detection and classification (tennis and cricket), the
+diagnostic ring, the command/button/LED logic, the saved-settings record with
+its corruption paths, and the dashboard API including authentication and
+validation.
 
 Calibration restarts itself, counting `failed`, if:
 

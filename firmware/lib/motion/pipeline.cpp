@@ -26,7 +26,9 @@ void OrientationPipeline::feed(const ImuSample &s, PipelineOutput &out) {
     if (needCal_) {
         cal_.start(s.rxMs);
         needCal_ = false;
-    } else if (cal_.state() == Calibrator::State::Collecting && clock_.discontinuity()) {
+    } else if (cal_.state() == Calibrator::State::Collecting && clock_.gap()) {
+        // Samples either side of a stall must not share one "still" window.
+        // (`gap()`, not a discontinuity: batched samples are normal traffic.)
         cal_.noteFailure("gap");
         cal_.start(s.rxMs);
     }
@@ -55,5 +57,7 @@ void OrientationPipeline::feed(const ImuSample &s, PipelineOutput &out) {
     out.anglesValid = !out.nearSingularity;
     out.gyro = gyro;
     out.up = filter_.gravity();
+    out.gravityMag = cal_.result().gravityMag;
     out.dtS = dt;
+    out.timingGap = clock_.gap();
 }

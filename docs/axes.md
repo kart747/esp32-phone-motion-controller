@@ -57,6 +57,26 @@ case, which is why it is rejected rather than silently producing noise.
 gyro pulse about **z** (the vertical) with a matching sideways x acceleration
 burst, and a backhand is the same pulse with the opposite sign.
 
+## Swing axes (Phase 5)
+
+The swing detector does **not** use raw device axes, because they overlap once
+the phone is tilted. It projects the gyro using the current gravity estimate so
+the three rotation integrals are mutually orthogonal:
+
+| Integral | From | Meaning | Used for |
+|---|---|---|---|
+| yaw | `gyro · up` | rotation about the vertical | forehand vs backhand |
+| pitch | horizontal part along device X | nose up / nose down | lob, serve |
+| roll | horizontal part along device Y | wrist roll | rejected |
+
+Held flat, `up = (0,0,1)` and these reduce to `(gz, gx, gy)`, so the signs match
+the table above. The axes are captured once at the start of a swing.
+
+`FOREHAND_YAW_SIGN` (+1 in `config.h`) decides which yaw sign is a forehand, so
+a left-handed player can flip it with `set yaw_sign -1`. A swing that begins
+more than `SWING_MAX_ONSET_TILT_DEG` from neutral is reported as
+`unsupported_pose` instead of guessing.
+
 ## Checking it on hardware
 
 With the phone (or the simulator) streaming, send `angles` on serial if angle

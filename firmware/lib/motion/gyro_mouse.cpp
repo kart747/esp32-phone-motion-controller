@@ -23,8 +23,7 @@ void drain(float &frac, int32_t &pend, int32_t backlogLimit) {
 
 }  // namespace
 
-void GyroMouse::feed(const Vec3 &gyro, const Vec3 &up, float dtS, uint32_t nowMs,
-                     const MouseSettings &s) {
+void GyroMouse::feed(const Vec3 &gyro, const Vec3 &up, float dtS, const MouseSettings &s) {
     if (!isfinite(gyro.x) || !isfinite(gyro.y) || !isfinite(gyro.z) || !(dtS > 0.0f)) return;
 
     const float yawRate = dot(gyro, up);   // turn about the vertical
@@ -34,28 +33,31 @@ void GyroMouse::feed(const Vec3 &gyro, const Vec3 &up, float dtS, uint32_t nowMs
     fracY_ += s.ySign * applyDeadzone(pitchRate, s.rateDeadzoneRadS) * s.gainCountsPerRad * dtS;
     drain(fracX_, pendX_, s.maxBacklog);
     drain(fracY_, pendY_, s.maxBacklog);
-
-    // Auto-click on the un-deadzoned speed, with hysteresis and a release hold.
-    const float speed = sqrtf(yawRate * yawRate + pitchRate * pitchRate);
-    if (!pressed_) {
-        if (speed >= s.clickOnRadS) {
-            pressed_ = true;
-            slow_ = false;
-        }
-    } else if (speed < s.clickOffRadS) {
-        if (!slow_) {
-            slow_ = true;
-            slowSinceMs_ = nowMs;
-        } else if (nowMs - slowSinceMs_ >= s.clickReleaseHoldMs) {
-            pressed_ = false;
-            slow_ = false;
-        }
-    } else {
-        slow_ = false;   // fast again: restart the hold
-    }
 }
 
-MouseReport GyroMouse::take(const MouseSettings &s) {
+void GyroMouse::triggerClick(uint32_t nowMs, const MouseSettings &s) {
+    if (!(s.clickHoldMs > 0)) return;
+    if (pressed_) {
+        ignoredTriggers_++;  // one click per stroke; never queue a later one
+        return;
+    }
+    pressed_ = true;
+    pressStartedMs_ = nowMs;
+}
+
+void GyroMouse::clearClick() {
+    pressed_ = false;
+    pressStartedMs_ = 0;
+}
+
+void GyroMouse::updatePulse(uint32_t nowMs, uint32_t holdMs) {
+    // Unsigned subtraction: correct across the millis() wrap.
+    if (pressed_ && (nowMs - pressStartedMs_) >= holdMs) pressed_ = false;
+}
+
+MouseReport GyroMouse::take(const MouseSettings &s, uint32_t nowMs) {
+    updatePulse(nowMs, s.clickHoldMs);
+
     MouseReport r;
     const int32_t dx = clampI32(pendX_, s.maxStep);
     const int32_t dy = clampI32(pendY_, s.maxStep);
@@ -71,5 +73,5 @@ void GyroMouse::reset() {
     fracX_ = fracY_ = 0.0f;
     pendX_ = pendY_ = 0;
     pressed_ = false;
-    slow_ = false;
+    pressStartedMs_ = 0;
 }

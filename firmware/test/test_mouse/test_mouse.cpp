@@ -8,8 +8,7 @@ namespace {
 
 MouseSettings settings() {
     return {MOUSE_GAIN_COUNTS_PER_RAD, MOUSE_RATE_DEADZONE_RAD_S, MOUSE_X_SIGN, MOUSE_Y_SIGN,
-            MOUSE_CLICK_ON_RAD_S,      MOUSE_CLICK_OFF_RAD_S,     MOUSE_CLICK_RELEASE_HOLD_MS,
-            MOUSE_MAX_STEP,            MOUSE_MAX_BACKLOG};
+            SWING_CLICK_HOLD_MS,       MOUSE_MAX_STEP,             MOUSE_MAX_BACKLOG};
 }
 
 const Vec3 kFlatUp{0.0f, 0.0f, 1.0f};     // phone flat, screen up
@@ -21,7 +20,7 @@ uint32_t run(GyroMouse &m, Vec3 gyro, Vec3 up, float seconds, uint32_t t0 = 0) {
     uint32_t t = t0;
     for (int i = 0; i < static_cast<int>(seconds * 100.0f + 0.5f); i++) {
         t += 10;
-        m.feed(gyro, up, 0.01f, t, s);
+        m.feed(gyro, up, 0.01f, s);
     }
     return t;
 }
@@ -31,7 +30,7 @@ void drainAll(GyroMouse &m, long &sx, long &sy) {
     sx = sy = 0;
     const MouseSettings s = settings();
     for (int i = 0; i < 100; i++) {
-        const MouseReport r = m.take(s);
+        const MouseReport r = m.take(s, 1000);
         sx += r.dx;
         sy += r.dy;
     }
@@ -45,7 +44,7 @@ void tearDown() {}
 void test_still_phone_does_not_move() {
     GyroMouse m;
     run(m, {0, 0, 0}, kFlatUp, 2.0f);
-    const MouseReport r = m.take(settings());
+    const MouseReport r = m.take(settings(), 1000);
     TEST_ASSERT_EQUAL_INT16(0, r.dx);
     TEST_ASSERT_EQUAL_INT16(0, r.dy);
     TEST_ASSERT_FALSE(r.pressed);
@@ -122,9 +121,9 @@ void test_slow_turns_still_accumulate() {
 void test_take_limits_step_and_keeps_the_rest() {
     GyroMouse m;
     run(m, {0, 0, 2.0f}, kFlatUp, 1.0f);  // about -960 counts queued
-    const MouseReport r = m.take(settings());
+    const MouseReport r = m.take(settings(), 1000);
     TEST_ASSERT_EQUAL_INT16(-MOUSE_MAX_STEP, r.dx);
-    const MouseReport r2 = m.take(settings());
+    const MouseReport r2 = m.take(settings(), 1000);
     TEST_ASSERT_EQUAL_INT16(-MOUSE_MAX_STEP, r2.dx);  // more is still waiting
 }
 
@@ -136,40 +135,80 @@ void test_backlog_is_capped() {
     TEST_ASSERT_TRUE(labs(sx) <= MOUSE_MAX_BACKLOG);
 }
 
-void test_click_presses_when_fast_and_has_hysteresis() {
+// The click is driven by recognised swings now, not by rotation speed.
+void test_fast_rotation_alone_does_not_click() {
     GyroMouse m;
-    uint32_t t = run(m, {0, 0, 2.0f}, kFlatUp, 0.1f);
-    TEST_ASSERT_TRUE(m.take(settings()).pressed);
-    // Between OFF and ON: stays pressed.
-    t = run(m, {0, 0, 1.0f}, kFlatUp, 0.5f, t);
-    TEST_ASSERT_TRUE(m.pressed());
-}
-
-void test_click_releases_only_after_the_hold_time() {
-    GyroMouse m;
-    uint32_t t = run(m, {0, 0, 2.0f}, kFlatUp, 0.1f);
-    // Slow for less than the hold time: still pressed.
-    t = run(m, {0, 0, 0.3f}, kFlatUp, 0.05f, t);
-    TEST_ASSERT_TRUE(m.pressed());
-    // Slow past the hold time: released.
-    t = run(m, {0, 0, 0.3f}, kFlatUp, 0.2f, t);
+    uint32_t t = run(m, {0, 0, 3.0f}, kFlatUp, 0.5f);  // much faster than the old ON threshold
+    TEST_ASSERT_FALSE(m.take(settings(), t).pressed);
     TEST_ASSERT_FALSE(m.pressed());
 }
 
-void test_fast_again_restarts_the_release_hold() {
+void test_trigger_produces_exactly_one_bounded_pulse() {
     GyroMouse m;
-    uint32_t t = run(m, {0, 0, 2.0f}, kFlatUp, 0.1f);
-    t = run(m, {0, 0, 0.3f}, kFlatUp, 0.05f, t);   // starts the hold
-    t = run(m, {0, 0, 2.0f}, kFlatUp, 0.05f, t);   // fast again: restart
-    t = run(m, {0, 0, 0.3f}, kFlatUp, 0.05f, t);   // short slow period again
+    const MouseSettings s = settings();
+    m.triggerClick(1000, s);
+    TEST_ASSERT_TRUE(m.take(s, 1000).pressed);            // press is visible at once
+    TEST_ASSERT_TRUE(m.take(s, 1000 + SWING_CLICK_HOLD_MS - 1).pressed);
+    TEST_ASSERT_FALSE(m.take(s, 1000 + SWING_CLICK_HOLD_MS).pressed);  // released on time
+    TEST_ASSERT_FALSE(m.pressed());
+}
+
+void test_trigger_during_a_pulse_is_ignored_and_counted() {
+    GyroMouse m;
+    const MouseSettings s = settings();
+    m.triggerClick(1000, s);
+    m.triggerClick(1020, s);  // still inside the pulse
+    m.triggerClick(1040, s);
+    TEST_ASSERT_EQUAL_UINT32(2, m.ignoredTriggers());
+    // One pulse only: it ends at the FIRST trigger's deadline, and no second
+    // click is replayed afterwards.
+    TEST_ASSERT_FALSE(m.take(s, 1000 + SWING_CLICK_HOLD_MS).pressed);
+    for (uint32_t t = 1000 + SWING_CLICK_HOLD_MS; t < 1400; t += 8) {
+        TEST_ASSERT_FALSE(m.take(s, t).pressed);
+    }
+}
+
+void test_trigger_after_release_starts_a_new_pulse() {
+    GyroMouse m;
+    const MouseSettings s = settings();
+    m.triggerClick(1000, s);
+    TEST_ASSERT_FALSE(m.take(s, 1000 + SWING_CLICK_HOLD_MS).pressed);
+    m.triggerClick(2000, s);
+    TEST_ASSERT_TRUE(m.take(s, 2000).pressed);
+    TEST_ASSERT_FALSE(m.take(s, 2000 + SWING_CLICK_HOLD_MS).pressed);
+}
+
+void test_clear_click_releases_immediately() {
+    GyroMouse m;
+    const MouseSettings s = settings();
+    m.triggerClick(1000, s);
     TEST_ASSERT_TRUE(m.pressed());
+    m.clearClick();                       // safety release
+    TEST_ASSERT_FALSE(m.take(s, 1001).pressed);
+}
+
+void test_pulse_survives_millis_wrap() {
+    GyroMouse m;
+    const MouseSettings s = settings();
+    const uint32_t start = 0xFFFFFFF0u;
+    m.triggerClick(start, s);
+    TEST_ASSERT_TRUE(m.take(s, start + 10).pressed);       // wrapped value
+    TEST_ASSERT_FALSE(m.take(s, start + SWING_CLICK_HOLD_MS).pressed);
+}
+
+void test_zero_hold_disables_clicks() {
+    GyroMouse m;
+    MouseSettings s = settings();
+    s.clickHoldMs = 0;
+    m.triggerClick(1000, s);
+    TEST_ASSERT_FALSE(m.take(s, 1000).pressed);
 }
 
 void test_reset_clears_movement_and_click() {
     GyroMouse m;
     run(m, {0, 0, 2.0f}, kFlatUp, 0.5f);
     m.reset();
-    const MouseReport r = m.take(settings());
+    const MouseReport r = m.take(settings(), 1000);
     TEST_ASSERT_EQUAL_INT16(0, r.dx);
     TEST_ASSERT_EQUAL_INT16(0, r.dy);
     TEST_ASSERT_FALSE(r.pressed);
@@ -178,10 +217,10 @@ void test_reset_clears_movement_and_click() {
 void test_bad_input_is_ignored() {
     GyroMouse m;
     const MouseSettings s = settings();
-    m.feed({NAN, 0, 0}, kFlatUp, 0.01f, 10, s);
-    m.feed({0, 0, 5.0f}, kFlatUp, 0.0f, 20, s);   // dt = 0
-    m.feed({0, 0, 5.0f}, kFlatUp, -0.01f, 30, s); // negative dt
-    const MouseReport r = m.take(s);
+    m.feed({NAN, 0, 0}, kFlatUp, 0.01f, s);
+    m.feed({0, 0, 5.0f}, kFlatUp, 0.0f, s);   // dt = 0
+    m.feed({0, 0, 5.0f}, kFlatUp, -0.01f, s); // negative dt
+    const MouseReport r = m.take(s, 1000);
     TEST_ASSERT_EQUAL_INT16(0, r.dx);
     TEST_ASSERT_FALSE(r.pressed);
 }
@@ -198,9 +237,13 @@ int main(int, char **) {
     RUN_TEST(test_slow_turns_still_accumulate);
     RUN_TEST(test_take_limits_step_and_keeps_the_rest);
     RUN_TEST(test_backlog_is_capped);
-    RUN_TEST(test_click_presses_when_fast_and_has_hysteresis);
-    RUN_TEST(test_click_releases_only_after_the_hold_time);
-    RUN_TEST(test_fast_again_restarts_the_release_hold);
+    RUN_TEST(test_fast_rotation_alone_does_not_click);
+    RUN_TEST(test_trigger_produces_exactly_one_bounded_pulse);
+    RUN_TEST(test_trigger_during_a_pulse_is_ignored_and_counted);
+    RUN_TEST(test_trigger_after_release_starts_a_new_pulse);
+    RUN_TEST(test_clear_click_releases_immediately);
+    RUN_TEST(test_pulse_survives_millis_wrap);
+    RUN_TEST(test_zero_hold_disables_clicks);
     RUN_TEST(test_reset_clears_movement_and_click);
     RUN_TEST(test_bad_input_is_ignored);
     return UNITY_END();
