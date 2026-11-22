@@ -29,7 +29,7 @@
   <h1 id="title">Fruit Slice</h1>
   <p id="msg">Swing the phone to move the blade. A fast swing holds the mouse button, which makes the blade cut.
      Slice the fruit, don't let it fall, and never hit a bomb.</p>
-  <p class="small">Click (or swing) to start &middot; [ ]: blade speed &middot; P: practice (no lives lost) &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
+  <p class="small">Click (or swing) to start &middot; M: laser / sword &middot; [ ]: blade speed &middot; C: recentre (laser) &middot; P: practice (no lives lost) &middot; B: toggle "button needed to cut" &middot; F: fullscreen</p>
 </div>
 <script>
 (() => {
@@ -61,13 +61,26 @@
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
   // ---------------------------------------------------------------- input
-  // ---- sword mapping ---------------------------------------------------
-  // With pointer lock the browser hands us the RAW counts from the board, with
-  // no desktop pointer acceleration, so the blade moves exactly as fast as the
-  // swing and stops dead when the phone stops. BOOST scales it up so a normal
-  // wrist swing crosses the screen. [ and ] change it.
+  // ---- blade mapping (M switches) -------------------------------------
+  // Pointer lock gives the RAW counts from the board, with no desktop
+  // pointer acceleration. Two ways to turn them into a blade position:
+  //  * laser: counts are added up into a pointing angle and the blade is drawn
+  //    where the phone points; turn back and it comes back. C recentres.
+  //    [ ] change how far you turn to cross the screen ("reach").
+  //  * sword: counts move the blade directly, times a boost; it moves as fast
+  //    as the swing and stops dead. [ ] change the boost.
+  const FW_COUNTS_PER_RAD = 200;     // MOUSE_GAIN_COUNTS_PER_RAD on the board
+  let mapMode = safeGet('slice_map') || 'laser';
   let boost = +(safeGet('slice_boost') || 4);
+  let reachDeg = +(safeGet('slice_reach') || 60);
   let blade = { x: W / 2, y: H / 2 };
+  let aimX = 0, aimY = 0;            // laser: counts since the last recentre
+  function laserPos() {
+    const k = W / (reachDeg * Math.PI / 180 * FW_COUNTS_PER_RAD);
+    return { x: Math.max(0, Math.min(W, W / 2 + aimX * k)),
+             y: Math.max(0, Math.min(H, H / 2 + aimY * k)) };
+  }
+  function recentre() { aimX = 0; aimY = 0; }
   const locked = () => document.pointerLockElement === cv;
   function lock() {
     if (locked() || !cv.requestPointerLock) return;
@@ -78,9 +91,14 @@
   function onMove(e) {
     let nx = e.clientX, ny = e.clientY;
     if (locked()) {
-      blade.x = Math.max(0, Math.min(W, blade.x + e.movementX * boost));
-      blade.y = Math.max(0, Math.min(H, blade.y + e.movementY * boost));
-      nx = blade.x; ny = blade.y;
+      if (mapMode === 'laser') {
+        aimX += e.movementX; aimY += e.movementY;
+        const lp = laserPos(); nx = lp.x; ny = lp.y;
+      } else {
+        blade.x = Math.max(0, Math.min(W, blade.x + e.movementX * boost));
+        blade.y = Math.max(0, Math.min(H, blade.y + e.movementY * boost));
+        nx = blade.x; ny = blade.y;
+      }
     }
     const dist = Math.hypot(nx - mouse.x, ny - mouse.y);
     mouse.speed = mouse.speed * 0.7 + dist * 0.3;
@@ -94,15 +112,24 @@
   }
   cv.addEventListener('pointermove', onMove);
   cv.addEventListener('pointerdown', e => { buttonDown = true; slicedThisSwing = 0;
-                                            if (!locked()) { lock(); blade = { x: mouse.x, y: mouse.y }; }
+                                            if (!locked()) { lock(); blade = { x: mouse.x, y: mouse.y }; recentre(); }
                                             if (!running) start(); });
   window.addEventListener('pointerup', () => { buttonDown = false; combo(); });
   window.addEventListener('keydown', e => {
     if (e.key === 'b' || e.key === 'B') needButton = !needButton;
     if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.();
     if (e.key === 'p' || e.key === 'P') practice = !practice;
-    if (e.key === ']') { boost = Math.min(12, boost + 1); safeSet('slice_boost', boost); }
-    if (e.key === '[') { boost = Math.max(1, boost - 1); safeSet('slice_boost', boost); }
+    if (e.key === 'm' || e.key === 'M') { mapMode = mapMode === 'laser' ? 'sword' : 'laser';
+                                          safeSet('slice_map', mapMode); recentre(); blade = { x: mouse.x, y: mouse.y }; }
+    if (e.key === 'c' || e.key === 'C') { recentre(); if (mapMode === 'laser') { const lp = laserPos(); mouse.x = lp.x; mouse.y = lp.y; } }
+    if (e.key === ']') {
+      if (mapMode === 'sword') { boost = Math.min(12, boost + 1); safeSet('slice_boost', boost); }
+      else { reachDeg = Math.max(20, reachDeg - 10); safeSet('slice_reach', reachDeg); }   // faster
+    }
+    if (e.key === '[') {
+      if (mapMode === 'sword') { boost = Math.max(1, boost - 1); safeSet('slice_boost', boost); }
+      else { reachDeg = Math.min(150, reachDeg + 10); safeSet('slice_reach', reachDeg); }  // slower
+    }
     if (e.key === ' ' && !running) start();
   });
 
@@ -247,7 +274,7 @@
     $('score').textContent = `Score ${score}`;
     $('lives').textContent = practice ? 'PRACTICE (P)' : '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, LIVES - lives));
     $('best').textContent = `Best ${best}`;
-    $('dbg').textContent = `${locked() ? 'sword (raw input)' : 'click to grab the blade'} · boost ${boost}x ([ ]) · button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · Esc releases the cursor`;
+    $('dbg').textContent = `${locked() ? mapMode.toUpperCase() + ' (M to switch)' : 'click to grab the blade'} · ${mapMode === 'sword' ? 'boost ' + boost + 'x' : 'reach ' + reachDeg + '° · C recentre'} ([ ] speed) · button ${buttonDown ? 'DOWN' : 'up'} · cut needs button: ${needButton ? 'yes' : 'no'} (B) · Esc releases the cursor`;
   }
 
   function frame(t) {
