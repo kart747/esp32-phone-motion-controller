@@ -82,7 +82,8 @@ void test_turn_right_moves_cursor_right() {
     run(m, {0, 0, -0.5f}, kFlatUp, 1.0f);
     long sx, sy;
     drainAll(m, sx, sy);
-    TEST_ASSERT_TRUE(sx > 100);
+    const float expected = (0.5f - MOUSE_RATE_DEADZONE_RAD_S) * MOUSE_GAIN_COUNTS_PER_RAD;
+    TEST_ASSERT_FLOAT_WITHIN(3.0f, expected, static_cast<float>(sx));
     TEST_ASSERT_EQUAL_INT32(0, sy);
 }
 
@@ -91,7 +92,9 @@ void test_nose_up_moves_cursor_up() {
     run(m, {0.5f, 0, 0}, kFlatUp, 1.0f);  // +gyro x = nose up
     long sx, sy;
     drainAll(m, sx, sy);
-    TEST_ASSERT_TRUE(sy < -100);          // screen Y grows downward, so up is negative
+    // Screen Y grows downward, so up is negative.
+    const float expected = -(0.5f - MOUSE_RATE_DEADZONE_RAD_S) * MOUSE_GAIN_COUNTS_PER_RAD;
+    TEST_ASSERT_FLOAT_WITHIN(3.0f, expected, static_cast<float>(sy));
     TEST_ASSERT_EQUAL_INT32(0, sx);
 }
 
@@ -117,7 +120,8 @@ void test_rotation_about_the_screen_normal_when_upright_does_not_move_x() {
 
 void test_deadzone_ignores_slow_drift() {
     GyroMouse m;
-    run(m, {0.05f, 0.0f, 0.05f}, kFlatUp, 30.0f);
+    const float slow = 0.5f * MOUSE_RATE_DEADZONE_RAD_S;  // inside the dead zone
+    run(m, {slow, 0.0f, slow}, kFlatUp, 30.0f);
     long sx, sy;
     drainAll(m, sx, sy);
     TEST_ASSERT_EQUAL_INT32(0, sx);
@@ -125,13 +129,14 @@ void test_deadzone_ignores_slow_drift() {
 }
 
 void test_slow_turns_still_accumulate() {
-    // 0.09 rad/s is just past the dead zone: 0.01 * 500 = 5 counts/s. At 100 Hz
-    // each sample adds 0.05 counts, so nothing is lost to rounding.
+    // Just past the dead zone (+0.01 rad/s): each 100 Hz sample adds only a
+    // fraction of a count, so this checks nothing is lost to rounding.
     GyroMouse m;
-    run(m, {0, 0, 0.09f}, kFlatUp, 4.0f);
+    run(m, {0, 0, MOUSE_RATE_DEADZONE_RAD_S + 0.01f}, kFlatUp, 4.0f);
     long sx, sy;
     drainAll(m, sx, sy);
-    TEST_ASSERT_INT_WITHIN(1, -20, static_cast<int>(sx));
+    const int expected = static_cast<int>(lroundf(-0.01f * MOUSE_GAIN_COUNTS_PER_RAD * 4.0f));
+    TEST_ASSERT_INT_WITHIN(1, expected, static_cast<int>(sx));
 }
 
 void test_take_limits_step_and_keeps_the_rest() {
