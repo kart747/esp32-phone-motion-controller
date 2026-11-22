@@ -23,7 +23,11 @@
 //       -o /tmp/replay_swings
 //
 // Usage:
-//   /tmp/replay_swings data/<session>_samples.csv data/<session>_swings.csv
+//   /tmp/replay_swings data/<session>_samples.csv data/<session>_swings.csv [key=value ...]
+//
+// Trailing key=value arguments (tunable names as used by the serial `set`
+// command, e.g. max_tilt=75) override the recorded settings, so a threshold
+// can be tried against old recordings without reflashing.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,7 +67,7 @@ std::vector<std::string> split(const std::string &line) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <samples.csv> [swings.csv]\n", argv[0]);
+        fprintf(stderr, "usage: %s <samples.csv> [swings.csv] [key=value ...]\n", argv[0]);
         return 2;
     }
 
@@ -71,7 +75,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> expectLabel;    // human label, e.g. "forehand"
     std::vector<std::string> deviceGesture;  // what the device said at record time
     std::string recordedSport = "tennis";
-    if (argc > 2) {
+    if (argc > 2 && !strchr(argv[2], '=')) {
         FILE *ex = fopen(argv[2], "r");
         if (ex) {
             char line[512];
@@ -116,6 +120,17 @@ int main(int argc, char **argv) {
             if (tunablesSet(tun, key.c_str(), v, &terr)) tunableRecords++;
         }
         fclose(pre);
+    }
+    for (int i = 2; i < argc; i++) {
+        const char *eq = strchr(argv[i], '=');
+        if (!eq) continue;
+        const std::string key(argv[i], static_cast<size_t>(eq - argv[i]));
+        TunableError terr = TunableError::None;
+        if (!tunablesSet(tun, key.c_str(), strtof(eq + 1, nullptr), &terr)) {
+            fprintf(stderr, "override %s rejected: %s\n", argv[i], tunableErrorText(terr));
+            return 2;
+        }
+        printf("override: %s\n", argv[i]);
     }
     const TunableError tunErr = validate(tun);
     if (tunErr != TunableError::None) {
